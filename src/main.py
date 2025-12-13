@@ -5,6 +5,7 @@ from src.db import engine,Base
 
 from src.models.UserModel import User
 from src.auth.auth_router import app as auth_router
+from src.media.media_router import app as media_router
 
 
 
@@ -12,6 +13,7 @@ app = FastAPI()
 
 # routers
 app.include_router(auth_router)
+app.include_router(media_router)
 
 
 @app.get("/init")
