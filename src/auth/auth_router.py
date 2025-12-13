@@ -5,7 +5,7 @@ from src.models.UserModel import User
 from src.auth.auth_shema import RegisterUser, ShowUser, LoginUser
 from fastapi import HTTPException
 from src.db import get_session
-from src.auth.auth_utilits import create_access_token, dencode_password, check_password
+from src.auth.auth_utilits import create_access_token, hash_password, check_password
 from src.get_current_user import get_current_user
 
 app = APIRouter(prefix="/users", tags=["Users"])
@@ -20,15 +20,19 @@ async def login_user(data:LoginUser,session:AsyncSession = Depends(get_session))
 
     user = await session.scalar(select(User).where(User.email == data.email))
 
-    if user:
-        if await check_password(password=data.password, old_password=user.password):
-                user_token = await create_access_token(user_id=user.id)
-                return {"token":user_token}
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    raise HTTPException(status_code=401, detail={
-                "details":"user is not exists",
-                "status":401
-        })
+    if not await check_password(user.password, data.password):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    token = await create_access_token(user_id=user.id)
+
+    return {
+        "access_token": token,
+        "token_type": "bearer"
+    }
+
 
 @app.post("/register")
 async def register_user(data:RegisterUser ,session:AsyncSession = Depends(get_session)):
@@ -43,7 +47,7 @@ async def register_user(data:RegisterUser ,session:AsyncSession = Depends(get_se
         
     data_dict = data.model_dump()
         
-    data_dict["password"] = await dencode_password(password=data.password)
+    data_dict["password"] = await hash_password(password=data.password)
     
     user = User(**data_dict)
     session.add(user) 

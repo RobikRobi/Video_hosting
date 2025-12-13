@@ -4,16 +4,15 @@ from src.db import engine,Base
 
 
 from src.models.UserModel import User
-from src.authors.router import app as authors_app
-from src.books.router import app as books_app
+from src.auth.auth_router import app as auth_router
 
 
 
 app = FastAPI()
 
 # routers
-app.include_router(authors_app)
-app.include_router(books_app)
+app.include_router(auth_router)
+
 
 @app.get("/init")
 async def create_db():

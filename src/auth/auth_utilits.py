@@ -85,7 +85,7 @@ async def verify_access_token(token: str) -> int:
     Проверяет токен, валидирует структуру и возвращает user_id (sub).
     Если токен неверен — вызывает HTTPException.
     """
-    payload = decode_access_token(token)
+    payload = await decode_access_token(token)
 
     # Проверяем стандартное поле sub = user_id
     user_id = payload.get("sub")

@@ -4,7 +4,7 @@ from src.config import config
 
 
 
-engine = create_async_engine(url = config.env_data.DB_URl_ASYNC, echo=True)
+engine = create_async_engine(url = config.env_data.DB_URL_ASYNC, echo=True)
 
 async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
