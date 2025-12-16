@@ -1,8 +1,16 @@
 import pathlib
 import uuid
 import aiofiles
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from fastapi.responses import FileResponse
+from src.db import get_session
+from src.get_current_user import get_current_user
+from src.models.UserModel import User
+from src.models.VideoModel import Video
+from src.models.CommentModel import Comment
+
 
 
 
@@ -10,34 +18,98 @@ app = APIRouter(prefix="/media", tags=["Media"])
 UPLOAD_DIR = pathlib.Path("videos")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-
-@app.post("/video")
-async def upload_video(file:UploadFile = File(...)):
+# Загрузка видео
+@app.post("/upload")
+async def upload_video(
+    title: str = Form(...),
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     ext = pathlib.Path(file.filename).suffix.lower()
-    if ext not in [".mp4"]:
+    if ext != ".mp4":
         raise HTTPException(status_code=400, detail="Only MP4 files are allowed")
+
     new_name = f"{uuid.uuid4()}{ext}"
     dist = UPLOAD_DIR / new_name
-    
-    async with aiofiles.open(dist, "wb") as f:
-        while chunk := await file.read(1024 * 1024):
-            await f.write(chunk)
-            if not chunk:
-                break
-            await f.write(chunk)
-    await file.close()
-    return {"filename":new_name, "url":dist}
+
+    try:
+        async with aiofiles.open(dist, "wb") as f:
+            while chunk := await file.read(1024 * 1024):
+                await f.write(chunk)
+
+        video = Video(title=title, url=f"/media/video/{new_name}", author_id=user.id)
+
+        session.add(video)
+        await session.commit()
+        await session.refresh(video)
+
+    except Exception:
+        await session.rollback()
+        if dist.exists():
+            dist.unlink()
+        raise
+
+    finally:
+        await file.close()
+
+    return {
+        "id": video.id,
+        "status": "saved",
+        "filename": new_name,
+        "url": video.url
+    }
+
+# Получение видео по id
+@app.get("/media/video/{video_id}")
+async def get_video(
+    video_id: int,
+    session: AsyncSession = Depends(get_session)
+):
+    video = await session.get(Video, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    file_path = UPLOAD_DIR / pathlib.Path(video.url).name
+
+    return FileResponse(
+        file_path,
+        media_type="video/mp4"
+    )
 
 
+# Удаление видео по id
+@app.delete("/media/video/{video_id}", status_code=204)
+async def delete_video(
+    video_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(Video).where(Video.id == video_id)
+    )
+    video = result.scalar_one_or_none()
 
-@app.get("/video")
-async def get_video(filename:str):
-    file = UPLOAD_DIR / filename
-    return FileResponse(file, media_type="video/mp4")
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
 
+    # Проверка владельца
+    if video.author_id != user.id:
+        raise HTTPException(status_code=403, detail="You are not allowed to delete this video")
 
-@app.delete("/video")
-async def get_video(filename:str):
-    file = UPLOAD_DIR / filename
-    file.unlink
-    return True
+    file_path = UPLOAD_DIR / pathlib.Path(video.url).name
+
+    try:
+        # Удаляем запись из БД
+        await session.delete(video)
+        await session.commit()
+
+        # Удаляем файл (если существует)
+        if file_path.exists():
+            file_path.unlink()
+
+    except Exception:
+        await session.rollback()
+        raise HTTPException(status_code=500, detail="Failed to delete video")
+
+    return None
