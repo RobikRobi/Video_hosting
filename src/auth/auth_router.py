@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from src.db import get_session
 from src.auth.auth_utilits import create_access_token, hash_password, check_password
 from src.get_current_user import get_current_user
+from src.worker import send_email
 
 app = APIRouter(prefix="/users", tags=["Users"])
 
@@ -34,6 +35,15 @@ async def login_user(data:LoginUser,session:AsyncSession = Depends(get_session))
     }
 
 
+subject = "Регистрация на сайте VideoHosting"
+text = """
+Здравствуйте!
+
+Спасибо, что зарегистрировались на нашем сайте.
+
+Теперь Вы можете не только смотреть чужие видео, но и создавать и подгружать свои.
+"""
+
 @app.post("/register")
 async def register_user(data:RegisterUser ,session:AsyncSession = Depends(get_session)):
     
@@ -51,11 +61,12 @@ async def register_user(data:RegisterUser ,session:AsyncSession = Depends(get_se
     
     user = User(**data_dict)
     session.add(user) 
-    await session.flush()
+    await session.flush([user])
 
     user_id = user.id
         
     await session.commit()
+    send_email.delay(user.email, subject, text)
         
     user_token = await create_access_token(user_id=user_id)
     data_dict["token"] = user_token  
