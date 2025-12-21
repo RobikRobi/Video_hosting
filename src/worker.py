@@ -27,11 +27,7 @@ def send_email(to_email:str, subject: str, message: str):
     msg["From"] = config.env_data.SMTP_USER
     msg["To"] = to_email
         
-    try:
-        with smtplib.SMTP(host, port) as server:
+    with smtplib.SMTP(host, port, timeout=10) as server:
             server.starttls()
             server.login(user, password)
             server.send_message(msg)
-        print("Email отправлен успешно")
-    except Exception as e:
-        raise HTTPException(500, f"Email send failed: {e}")
