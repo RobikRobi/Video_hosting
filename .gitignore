@@ -6,4 +6,4 @@ src/auth/tokens/*.pem
 # Python cache
 __pycache__/
 *.pyc
-
+tasks.txt

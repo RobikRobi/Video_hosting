@@ -1,15 +1,21 @@
+import os
 import pathlib
 import uuid
 import aiofiles
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from fastapi.responses import FileResponse
+from sqlalchemy.orm import selectinload
 from src.db import get_session
+from src.redis_client import redis_client
+from src.media.media_utillits import increment_view, file_iterator
 from src.get_current_user import get_current_user
 from src.models.UserModel import User
 from src.models.VideoModel import Video
 from src.models.CommentModel import Comment
+from src.media.media_shema import VideoShow
+
 
 
 
@@ -18,11 +24,13 @@ app = APIRouter(prefix="/media", tags=["Media"])
 UPLOAD_DIR = pathlib.Path("videos")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+
 # Загрузка видео
 @app.post("/upload")
 async def upload_video(
     title: str = Form(...),
     file: UploadFile = File(...),
+    description: str = Form(...),
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -38,7 +46,10 @@ async def upload_video(
             while chunk := await file.read(1024 * 1024):
                 await f.write(chunk)
 
-        video = Video(title=title, url=f"/media/video/{new_name}", author_id=user.id)
+        video = Video(title=title, 
+                      description=description, 
+                      url=f"/media/video/{new_name}", 
+                      author_id=user.id)
 
         session.add(video)
         await session.commit()
@@ -60,26 +71,94 @@ async def upload_video(
         "url": video.url
     }
 
-# Получение видео по id
+# Стриминг видео
 @app.get("/media/video/{video_id}")
-async def get_video(
+async def stream_video(
     video_id: int,
-    session: AsyncSession = Depends(get_session)
+    request: Request,
+    session: AsyncSession = Depends(get_session),
 ):
-    video = await session.get(Video, video_id)
+    # 1. Получаем видео
+    video = await session.scalar(
+        select(Video).where(Video.id == video_id)
+    )
+
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
 
     file_path = UPLOAD_DIR / pathlib.Path(video.url).name
 
-    return FileResponse(
-        file_path,
-        media_type="video/mp4"
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Video file not found")
+
+    file_size = os.path.getsize(file_path)
+    range_header = request.headers.get("range")
+
+    # 2. Счётчик просмотров
+    client_ip = request.client.host
+    await increment_view(video_id, client_ip)
+
+    # 3. Если Range отсутствует — отдаём всё
+    if not range_header:
+        return StreamingResponse(
+            file_iterator(str(file_path), 0, file_size - 1),
+            media_type="video/mp4",
+            headers={
+                "Content-Length": str(file_size),
+                "Accept-Ranges": "bytes",
+            },
+        )
+
+    # 4. Парсинг Range
+    try:
+        _, range_value = range_header.split("=")
+        start_str, end_str = range_value.split("-")
+        start = int(start_str)
+        end = int(end_str) if end_str else file_size - 1
+    except Exception:
+        raise HTTPException(status_code=416, detail="Invalid Range header")
+
+    if start >= file_size:
+        raise HTTPException(status_code=416, detail="Range not satisfiable")
+
+    end = min(end, file_size - 1)
+    content_length = end - start + 1
+
+    # 5. Частичный ответ
+    return StreamingResponse(
+        file_iterator(str(file_path), start, end),
+        status_code=206,
+        media_type="video/mp4",
+        headers={
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(content_length),
+        },
     )
 
 
+# Получение информации о видео
+@app.get("/desc/{video_id}", response_model=VideoShow)
+async def get_video(
+    video_id: int,
+    session: AsyncSession = Depends(get_session)
+):
+    stmt = select(Video).where(Video.id==video_id).options(selectinload(Video.author))
+    video = await session.scalar(stmt)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    return video
+
+# Получение количества просмотров
+@app.get("/views/{video_id}")
+async def get_views(video_id: int) -> int:
+    value = await redis_client.get(f"video:views:{video_id}")
+    return int(value) if value else 0
+
+
 # Удаление видео по id
-@app.delete("/media/video/{video_id}", status_code=204)
+@app.delete("/video/{video_id}", status_code=204)
 async def delete_video(
     video_id: int,
     user: User = Depends(get_current_user),

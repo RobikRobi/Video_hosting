@@ -23,3 +23,13 @@ class User(Base):
     videos: Mapped[list["Video"]] = relationship(back_populates="author", cascade="all, delete-orphan")
     # Связь с таблицей Comment
     comments: Mapped[list["Comment"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+
+# Модель токена восстановления
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token: Mapped[str] = mapped_column(String, unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    expires_at: Mapped[datetime.datetime]

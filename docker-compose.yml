@@ -15,34 +15,44 @@ services:
     ports:
       - "5432:5432"
 
+  redis:
+    image: redis:7
+    container_name: redis
+    restart: always
+
   backend:
     build: .
     container_name: app
     restart: always
+    env_file:
+      - .env
     depends_on:
       - db
       - redis
-      - celery
-    env_file:
-    - .env
     ports:
       - "8000:8000"
 
-
-  redis:
-    image: redis:alpine
-    container_name: redis
-    ports:
-      - "6379:6379"
-  celery:
+  celery_worker:
     build: .
-    container_name: celery
+    container_name: celery_worker
     restart: always
-    depends_on:
-      - redis
     env_file:
       - .env
-    command: celery -A src.worker.celery_app worker --loglevel=info
+    depends_on:
+      - redis
+      - db
+    command: celery -A src.celery_app worker -l info
+
+  celery_beat:
+    build: .
+    container_name: celery_beat
+    restart: always
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - db
+    command: celery -A src.celery_app beat -l info
 
   flower:
     image: mher/flower
@@ -50,7 +60,7 @@ services:
     restart: always
     depends_on:
       - redis
-      - celery
+      - celery_worker
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
     ports:
