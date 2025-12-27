@@ -153,7 +153,7 @@ async def get_video(
 # Получение количества просмотров
 @app.get("/views/{video_id}")
 async def get_views(video_id: int) -> int:
-    value = await redis_client.get(f"video:views:{video_id}")
+    value = redis_client.get(f"video:views:{video_id}")
     return int(value) if value else 0
 
 

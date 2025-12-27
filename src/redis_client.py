@@ -1,4 +1,4 @@
-import redis.asyncio as redis
+import redis
 from src.config import config
 
 redis_client = redis.Redis(
