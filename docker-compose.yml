@@ -43,17 +43,6 @@ services:
       - db
     command: celery -A src.celery_app worker -l info
 
-  celery_beat:
-    build: .
-    container_name: celery_beat
-    restart: always
-    env_file:
-      - .env
-    depends_on:
-      - redis
-      - db
-    command: celery -A src.celery_app beat -l info
-
   flower:
     image: mher/flower
     container_name: flower

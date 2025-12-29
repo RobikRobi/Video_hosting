@@ -1,6 +1,5 @@
 import os
 from typing import Generator
-from src.redis_client import redis_client
 from src.models.VideoModel import Video
 
 
@@ -25,16 +24,16 @@ def file_iterator(
 
 
 
-# Счётчик просмотров
-async def increment_view(video_id: int, ip: str):
-    viewed_key = f"viewed:{video_id}:{ip}"
-    views_key = f"video:views:{video_id}"
+# # Счётчик просмотров
+# async def increment_view(video_id: int, ip: str):
+#     viewed_key = f"viewed:{video_id}:{ip}"
+#     views_key = f"video:views:{video_id}"
 
-    if not await redis_client.exists(viewed_key):
-        await redis_client.setex(viewed_key, 30, 1)
-        await redis_client.incr(views_key)
+#     if not await redis_async_client.exists(viewed_key):
+#         await redis_async_client.setex(viewed_key, 30, 1)
+#         await redis_async_client.incr(views_key)
 
-# Получение итогового числа просмотров
-async def get_total_views(video: Video) -> int:
-    redis_views = await redis_client.get(f"video:views:{video.id}")
-    return video.views + int(redis_views or 0)
+# # Получение итогового числа просмотров
+# async def get_total_views(video: Video) -> int:
+#     redis_views = await redis_async_client.get(f"video:views:{video.id}")
+#     return video.views + int(redis_views or 0)

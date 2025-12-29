@@ -5,14 +5,13 @@ import aiofiles
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update, delete
 from sqlalchemy.orm import selectinload
 from src.db import get_session
-from src.redis_client import redis_client
-from src.media.media_utillits import increment_view, file_iterator
+from src.media.media_utillits import file_iterator
 from src.get_current_user import get_current_user
 from src.models.UserModel import User
-from src.models.VideoModel import Video
+from src.models.VideoModel import Video, VideoLike
 from src.models.CommentModel import Comment
 from src.media.media_shema import VideoShow
 
@@ -94,9 +93,13 @@ async def stream_video(
     file_size = os.path.getsize(file_path)
     range_header = request.headers.get("range")
 
-    # 2. Счётчик просмотров
-    client_ip = request.client.host
-    await increment_view(video_id, client_ip)
+    # 2. Счётчик просмотров  
+    await session.execute(
+    update(Video)
+    .where(Video.id == video_id)
+    .values(views=Video.views + 1)
+    )
+    await session.commit()
 
     # 3. Если Range отсутствует — отдаём всё
     if not range_header:
@@ -150,13 +153,6 @@ async def get_video(
 
     return video
 
-# Получение количества просмотров
-@app.get("/views/{video_id}")
-async def get_views(video_id: int) -> int:
-    value = redis_client.get(f"video:views:{video_id}")
-    return int(value) if value else 0
-
-
 # Удаление видео по id
 @app.delete("/video/{video_id}", status_code=204)
 async def delete_video(
@@ -192,3 +188,70 @@ async def delete_video(
         raise HTTPException(status_code=500, detail="Failed to delete video")
 
     return None
+
+# Ставим like
+@app.post("/video/{video_id}/like")
+async def toggle_like(
+    video_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    # Проверяем, есть ли видео
+    video_exists = await session.scalar(
+        select(Video.id).where(Video.id == video_id)
+    )
+    if not video_exists:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    # Проверяем, есть ли лайк
+    like = await session.scalar(
+        select(VideoLike)
+        .where(
+            VideoLike.video_id == video_id,
+            VideoLike.user_id == user.id,
+        )
+    )
+
+    # Лайк уже есть - снимаем
+    if like:
+        await session.execute(
+            delete(VideoLike)
+            .where(VideoLike.id == like.id)
+        )
+        await session.execute(
+            update(Video)
+            .where(Video.id == video_id)
+            .values(likes=Video.likes - 1)
+        )
+        await session.commit()
+
+        return {"liked": False}
+
+    # Лайка нет - ставим
+    session.add(
+        VideoLike(user_id=user.id, video_id=video_id)
+    )
+    await session.execute(
+        update(Video)
+        .where(Video.id == video_id)
+        .values(likes=Video.likes + 1)
+    )
+    await session.commit()
+
+    return {"liked": True}
+
+# Получить статус лайка для пользователя
+@app.get("/video/{video_id}/like")
+async def is_liked(
+    video_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    liked = await session.scalar(
+        select(VideoLike.id)
+        .where(
+            VideoLike.video_id == video_id,
+            VideoLike.user_id == user.id,
+        )
+    )
+    return {"liked": bool(liked)}

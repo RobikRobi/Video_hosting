@@ -4,7 +4,7 @@ from email.mime.text import MIMEText
 from sqlalchemy import create_engine, update
 from sqlalchemy.orm import sessionmaker
 from src.config import config
-from src.redis_client import redis_client
+from src.redis_sync import redis_client
 from src.models.VideoModel import Video
 from src.models.UserModel import User
 from src.models.CommentModel import Comment
@@ -21,14 +21,6 @@ celery_app = Celery(
 )
 
 celery_app.conf.timezone = "UTC"
-
-# ---------- Beat ----------
-celery_app.conf.beat_schedule = {
-    "sync-video-views-every-minute": {
-        "task": "sync_views",
-        "schedule": 60.0,
-    },
-}
 
 # ---------- Email ----------
 @celery_app.task(name="send_email")
@@ -50,34 +42,3 @@ def send_email(to_email: str, subject: str, message: str):
         )
         server.send_message(msg)
 
-# ---------- Task ----------
-@celery_app.task(
-    name="sync_views",
-    bind=True,
-    autoretry_for=(Exception,),
-    retry_backoff=10,
-)
-def sync_views(self):
-    session = SessionLocal()
-    try:
-        keys = redis_client.keys("video:views:*")
-
-        for key in keys:
-            video_id = int(key.split(":")[-1])
-            views = int(redis_client.get(key))
-
-            session.execute(
-                update(Video)
-                .where(Video.id == video_id)
-                .values(views=Video.views + views)
-            )
-
-            redis_client.delete(key)
-
-        session.commit()
-
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
