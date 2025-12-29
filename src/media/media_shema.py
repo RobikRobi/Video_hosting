@@ -12,6 +12,7 @@ class VideoShow(BaseModel):
     title: str
     description: str
     views: int
+    likes: int
     author: UserShow
 
     class Config:

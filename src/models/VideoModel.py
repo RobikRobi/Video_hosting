@@ -25,7 +25,7 @@ class Video(Base):
     # Связь с таблицей Comment
     comments: Mapped[list["Comment"]] = relationship(back_populates="video", cascade="all, delete-orphan")
 
-
+# таблица-модель (join entity)
 class VideoLike(Base):
     __tablename__ = "video_like"
 
