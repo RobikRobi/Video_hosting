@@ -14,9 +14,10 @@ class Comment(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime.datetime] = mapped_column(default=datetime.datetime.utcnow)
+    created_at: Mapped[datetime.datetime] = mapped_column(default=datetime.timezone.utc)
+
     # Связи
-    # Связь с таблицами User и Video
+    # Связи с таблицами User и Video
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"))
     video_id: Mapped[int] = mapped_column(ForeignKey("video.id"))
 

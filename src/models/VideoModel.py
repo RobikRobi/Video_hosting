@@ -6,6 +6,7 @@ from src.db import Base
 if typing.TYPE_CHECKING:
     from src.models.UserModel import User
     from src.models.CommentModel import Comment
+    from src.models.ChannelModel import Channel
 
 
 class Video(Base):
@@ -19,11 +20,20 @@ class Video(Base):
     likes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
 
     # Связи
-    # Связь с таблицей User
-    author_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False, index=True)
-    author: Mapped["User"] = relationship(back_populates="videos")
-    # Связь с таблицей Comment
-    comments: Mapped[list["Comment"]] = relationship(back_populates="video", cascade="all, delete-orphan")
+    # Автор видео
+    author_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="SET NULL"),
+                                                      nullable=True)
+     # SET NULL, если пользователь будет удалён — поле author_id у видео станет NULL, 
+     # а само видео останется.
+    author: Mapped["User"] = relationship()
+    # Комментарии
+    comments: Mapped[list["Comment"]] = relationship(back_populates="video", 
+                                                     cascade="all, delete-orphan")
+    # Канал, где размещено видео
+    channel_id: Mapped[int] = mapped_column(ForeignKey("channel.id", ondelete="CASCADE"),
+                                            nullable=False,
+                                            index=True)
+    channel: Mapped["Channel"] = relationship(back_populates="videos")
 
 # таблица-модель (join entity)
 class VideoLike(Base):

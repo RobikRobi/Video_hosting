@@ -7,6 +7,8 @@ from src.db import Base
 if typing.TYPE_CHECKING:
     from src.models.VideoModel import Video
     from src.models.CommentModel import Comment
+    from src.models.ChannelModel import Channel
+    from src.models.ChannelModel import Subscriptions
 
 
 class User(Base):
@@ -19,10 +21,21 @@ class User(Base):
     password: Mapped[str] = mapped_column(String, nullable=False)
 
     # Связи
-    # Связь с таблицей Video
-    videos: Mapped[list["Video"]] = relationship(back_populates="author", cascade="all, delete-orphan")
-    # Связь с таблицей Comment
-    comments: Mapped[list["Comment"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    # Видео пользователя
+    videos: Mapped[list["Video"]] = relationship(back_populates="author", 
+                                                 cascade="all, delete-orphan")
+    # Комментарии пользователя
+    comments: Mapped[list["Comment"]] = relationship(back_populates="user", 
+                                                     cascade="all, delete-orphan")
+    # Канал пользователя
+    channel: Mapped["Channel"] = relationship(back_populates="owner", 
+                                              uselist=False,
+                                              cascade="all, delete-orphan")
+
+    # Подписки пользователя
+    subscriptions: Mapped[list["Subscriptions"]] = relationship(back_populates="user", 
+                                                          cascade="all, delete-orphan")
+
 
 
 # Модель токена восстановления
