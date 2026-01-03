@@ -1,12 +1,12 @@
 from celery import Celery
 import smtplib
 from email.mime.text import MIMEText
-from sqlalchemy import create_engine, update
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from src.config import config
-from src.redis_sync import redis_client
-from src.models.VideoModel import Video
-from src.models.UserModel import User
+from src.models.UserModel import User, PasswordResetToken
+from src.models.ChannelModel import Channel, Subscriptions
+from src.models.VideoModel import Video, VideoLike
 from src.models.CommentModel import Comment
 
 # ---------- DB ----------

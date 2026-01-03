@@ -47,11 +47,17 @@ text = """
 
 Спасибо, что зарегистрировались на нашем сайте.
 
-Теперь Вы можете не только смотреть чужие видео, но и создавать и подгружать свои.
+Теперь Вы можете не только смотреть чужие видео, но и создавать свои видео. 
+
+А также делится своим контентом на собственном канале.
+
+Надеемся на долгое и плодотворное сотрудничество с Вами.
+
+С уважением, администрация хостинга
 """
 # Регистрация пользователя с отправкой сообщения на email
 @app.post("/register")
-async def register_user(data:RegisterUser ,session:AsyncSession = Depends(get_session)):
+async def register_user(data:RegisterUser, session:AsyncSession = Depends(get_session)):
     
     isUserEx = await session.scalar(select(User).where(User.email == data.email))
     

@@ -12,7 +12,6 @@ from src.media.media_utillits import file_iterator
 from src.get_current_user import get_current_user
 from src.models.UserModel import User
 from src.models.VideoModel import Video, VideoLike
-from src.models.CommentModel import Comment
 from src.media.media_shema import VideoShow
 
 
