@@ -38,9 +38,11 @@ class Channel(Base):
 class Subscriptions(Base):
     __tablename__ = "subscriptions"
 
-    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"))
-    channel_id: Mapped[int] = mapped_column(ForeignKey("channel.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), 
+                                         primary_key=True)
+    channel_id: Mapped[int] = mapped_column(ForeignKey("channel.id", ondelete="CASCADE"),
+                                            primary_key=True)
     created_at: Mapped[datetime.datetime] = mapped_column(default=datetime.timezone.utc)
 
-    users: Mapped["User"] = relationship(back_populates="subscriptions")
-    channels: Mapped["Channel"] = relationship(back_populates="subscribers")
+    user: Mapped["User"] = relationship(back_populates="subscriptions")
+    channel: Mapped["Channel"] = relationship(back_populates="subscribers")
