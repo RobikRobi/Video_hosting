@@ -157,7 +157,7 @@ async def get_video(
 async def delete_video(
     video_id: int,
     user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_session)
 ):
     result = await session.execute(
         select(Video).where(Video.id == video_id)
