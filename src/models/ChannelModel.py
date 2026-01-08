@@ -1,7 +1,8 @@
 import typing
 import datetime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import ForeignKey, BigInteger, UniqueConstraint
+from sqlalchemy import ForeignKey
+from sqlalchemy import func
 from src.db import Base
 
 if typing.TYPE_CHECKING:
@@ -42,7 +43,7 @@ class Subscriptions(Base):
                                          primary_key=True)
     channel_id: Mapped[int] = mapped_column(ForeignKey("channel.id", ondelete="CASCADE"),
                                             primary_key=True)
-    created_at: Mapped[datetime.datetime] = mapped_column(default=datetime.timezone.utc)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="subscriptions")
     channel: Mapped["Channel"] = relationship(back_populates="subscribers")

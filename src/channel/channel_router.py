@@ -4,9 +4,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from src.db import get_session
 from src.get_current_user import get_current_user
-from src.channel.channel_shema import CreateChannel, ShowChannel
+from src.channel.channel_shema import CreateChannel, ShowChannel, SubscriptionChannelOut
 from src.models.UserModel import User
-from src.models.ChannelModel import Channel
+from src.models.ChannelModel import Channel, Subscriptions
 
 
 
@@ -84,3 +84,85 @@ async def delete_channel(
         raise HTTPException(status_code=500, detail="Failed to delete channel")
 
     return None
+
+
+# Подписка на канал
+@app.post("/{channel_id}/subscribe")
+async def subscribe_to_channel(channel_id: int,
+                  user: User = Depends(get_current_user),
+                  session: AsyncSession = Depends(get_session)):
+    # Проверяем, существует ли канал
+    channel = await session.get(Channel, channel_id)
+    if not channel:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Channel not found",
+        )
+    # Запрещаем подписку на свой канал
+    if channel.owner_id == user.id:
+        raise HTTPException(
+            tatus_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot subscribe to your own channel",
+        )
+    # Проверяем, есть ли уже подписка
+    result = await session.execute(
+        select(Subscriptions).where(
+            Subscriptions.user_id == user.id,
+            Subscriptions.channel_id == channel_id
+        )
+    )
+    existing_subscription = result.scalar_one_or_none()
+    if existing_subscription:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You are already subscribed to this channel",
+        )
+    # Делаем подписку на канал
+    subscription = Subscriptions(user_id = user.id, channel_id = channel_id)
+    session.add(subscription)
+    await session.commit()
+
+    return {"message": "Successfully subscribed"}
+
+
+# Отписка от канала
+@app.delete("/{channel_id}/subscribe", status_code=status.HTTP_200_OK)
+async def unsubscribe_from_channel(channel_id: int, 
+                                   user: User = Depends(get_current_user),
+                                   session: AsyncSession = Depends(get_session)):
+    result = await session.execute(
+        select(Subscriptions).where(
+            Subscriptions.user_id == user.id,
+            Subscriptions.channel_id == channel_id
+        )
+    )
+    # Проверяем, есть ли подписка на канал
+    subscription = result.scalar_one_or_none()
+
+    if not subscription:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subscription not found",
+        )
+    await session.delete(subscription)
+    await session.commit()
+
+    return {"message": "Successfully unsubscribed"}
+
+# Получение всех подписок пользователя
+@app.get("/subscriptions/me", response_model=list[SubscriptionChannelOut])
+async def get_my_subscriptions(user: User = Depends(get_current_user), 
+                               session: AsyncSession = Depends(get_session)):
+    stmt = (select(Channel.id.label("channel_id"),
+                  Channel.title,
+                  Channel.description,
+                  Channel.img,
+                  Subscriptions.created_at.label("subscribed_at"))
+                  .join(Subscriptions, Subscriptions.channel_id == Channel.id)
+                  .where(Subscriptions.user_id == user.id)
+                  .order_by(Subscriptions.created_at.desc())
+                  )
+    result = await session.execute(stmt)
+    rows = result.all()
+
+    return rows

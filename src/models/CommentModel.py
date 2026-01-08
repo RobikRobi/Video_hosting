@@ -2,6 +2,7 @@ import typing
 import datetime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import ForeignKey, Text
+from sqlalchemy import func
 from src.db import Base
 
 if typing.TYPE_CHECKING:
@@ -14,7 +15,7 @@ class Comment(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime.datetime] = mapped_column(default=datetime.timezone.utc)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
 
     # Связи
     # Связи с таблицами User и Video
