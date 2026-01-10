@@ -1,5 +1,7 @@
 .venv
-.env
+.env.local
+.env.prod
+
 # JWT keys
 src/auth/tokens/*.pem
 

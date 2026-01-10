@@ -1,20 +1,5 @@
 
 services:
-  db:
-    image: postgres:16
-    container_name: db
-    restart: always
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: 664053
-      POSTGRES_DB: lessons
-    env_file:
-      - .env
-    volumes:
-      - ./postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-
   redis:
     image: redis:7
     container_name: redis
@@ -25,9 +10,8 @@ services:
     container_name: app
     restart: always
     env_file:
-      - .env
+      - .env.prod
     depends_on:
-      - db
       - redis
     ports:
       - "8000:8000"
@@ -37,10 +21,9 @@ services:
     container_name: celery_worker
     restart: always
     env_file:
-      - .env
+      - .env.prod
     depends_on:
       - redis
-      - db
     command: celery -A src.celery_app worker -l info
 
   flower:

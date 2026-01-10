@@ -5,8 +5,9 @@ from src.db import Base
 
 if typing.TYPE_CHECKING:
     from src.models.UserModel import User
-    from src.models.CommentModel import Comment
     from src.models.ChannelModel import Channel
+    from src.models.CommentModel import Comment
+    
 
 
 class Video(Base):

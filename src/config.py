@@ -22,7 +22,7 @@ class EnvData(BaseSettings):
     REDIS_HOST: str
     REDIS_PORT: int
 
-    model_config = SettingsConfigDict(env_file=".env")
+    model_config = SettingsConfigDict(env_file=".env.prod")
 
 
 class Config(BaseModel):
