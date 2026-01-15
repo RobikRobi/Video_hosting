@@ -2,23 +2,27 @@ import os
 import pathlib
 import uuid
 import aiofiles
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form, Request
+# import dropbox
+from src.config import config
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update, delete, func
 from sqlalchemy.orm import selectinload
 from src.db import get_session
-from src.media.media_utillits import file_iterator
+from src.media.media_utillits import file_iterator, get_video_or_404, get_video_owned_by_user, get_user_video_like
 from src.get_current_user import get_current_user
 from src.models.UserModel import User
 from src.models.VideoModel import Video, VideoLike
-from src.media.media_shema import VideoShow
-
-
+from src.models.CommentModel import Comment
+from src.media.media_shema import VideoShow, CommentCreate, CommentOut
 
 
 
 app = APIRouter(prefix="/media", tags=["Media"])
+
+# app = APIRouter(prefix="/videos", tags=["Videos"])
+# dbx = dropbox.Dropbox(config.env_data.ACCESS_TOKEN)
 UPLOAD_DIR = pathlib.Path("videos")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -46,7 +50,7 @@ async def upload_video(
 
         video = Video(title=title, 
                       description=description, 
-                      url=f"/media/video/{new_name}", 
+                      url=f"/video/{new_name}", 
                       author_id=user.id)
 
         session.add(video)
@@ -70,37 +74,33 @@ async def upload_video(
     }
 
 # Стриминг видео
-@app.get("/media/video/{video_id}")
+@app.get("/video/{video_id}")
 async def stream_video(
-    video_id: int,
     request: Request,
+    video: Video = Depends(get_video_or_404),
     session: AsyncSession = Depends(get_session),
 ):
-    # 1. Получаем видео
-    video = await session.scalar(
-        select(Video).where(Video.id == video_id)
-    )
-
-    if not video:
-        raise HTTPException(status_code=404, detail="Video not found")
-
+    # 1. Проверяем наличие файла
     file_path = UPLOAD_DIR / pathlib.Path(video.url).name
 
     if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Video file not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video file not found",
+        )
 
     file_size = os.path.getsize(file_path)
     range_header = request.headers.get("range")
 
-    # 2. Счётчик просмотров  
+    # 2. Инкремент просмотров (без race condition)
     await session.execute(
-    update(Video)
-    .where(Video.id == video_id)
-    .values(views=Video.views + 1)
+        update(Video)
+        .where(Video.id == video.id)
+        .values(views=func.coalesce(Video.views, 0) + 1)
     )
     await session.commit()
 
-    # 3. Если Range отсутствует — отдаём всё
+    # 3. Если Range нет — отдаём весь файл
     if not range_header:
         return StreamingResponse(
             file_iterator(str(file_path), 0, file_size - 1),
@@ -111,25 +111,31 @@ async def stream_video(
             },
         )
 
-    # 4. Парсинг Range
+    # 4. Парсим Range
     try:
         _, range_value = range_header.split("=")
         start_str, end_str = range_value.split("-")
         start = int(start_str)
         end = int(end_str) if end_str else file_size - 1
-    except Exception:
-        raise HTTPException(status_code=416, detail="Invalid Range header")
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE,
+            detail="Invalid Range header",
+        )
 
     if start >= file_size:
-        raise HTTPException(status_code=416, detail="Range not satisfiable")
+        raise HTTPException(
+            status_code=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE,
+            detail="Range not satisfiable",
+        )
 
     end = min(end, file_size - 1)
     content_length = end - start + 1
 
-    # 5. Частичный ответ
+    # 5. Частичный контент
     return StreamingResponse(
         file_iterator(str(file_path), start, end),
-        status_code=206,
+        status_code=status.HTTP_206_PARTIAL_CONTENT,
         media_type="video/mp4",
         headers={
             "Content-Range": f"bytes {start}-{end}/{file_size}",
@@ -138,47 +144,31 @@ async def stream_video(
         },
     )
 
-
 # Получение информации о видео
 @app.get("/desc/{video_id}", response_model=VideoShow)
 async def get_video(
-    video_id: int,
+    video: Video = Depends(get_video_or_404),
     session: AsyncSession = Depends(get_session)
 ):
-    stmt = select(Video).where(Video.id==video_id).options(selectinload(Video.author))
-    video = await session.scalar(stmt)
-    if not video:
-        raise HTTPException(status_code=404, detail="Video not found")
+    # stmt = select(Video).where(Video.id==video_id).options(selectinload(Video.author))
+    # video = await session.scalar(stmt)
+    # if not video:
+    #     raise HTTPException(status_code=404, detail="Video not found")
 
     return video
 
 # Удаление видео по id
 @app.delete("/video/{video_id}", status_code=204)
 async def delete_video(
-    video_id: int,
-    user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session)
+    video: Video = Depends(get_video_owned_by_user),
+    session: AsyncSession = Depends(get_session),
 ):
-    result = await session.execute(
-        select(Video).where(Video.id == video_id)
-    )
-    video = result.scalar_one_or_none()
-
-    if not video:
-        raise HTTPException(status_code=404, detail="Video not found")
-
-    # Проверка владельца
-    if video.author_id != user.id:
-        raise HTTPException(status_code=403, detail="You are not allowed to delete this video")
-
     file_path = UPLOAD_DIR / pathlib.Path(video.url).name
 
     try:
-        # Удаляем запись из БД
         await session.delete(video)
         await session.commit()
 
-        # Удаляем файл (если существует)
         if file_path.exists():
             file_path.unlink()
 
@@ -191,48 +181,29 @@ async def delete_video(
 # Ставим like
 @app.post("/video/{video_id}/like")
 async def toggle_like(
-    video_id: int,
+    video: Video = Depends(get_video_or_404),
+    like: VideoLike | None = Depends(get_user_video_like),
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    # Проверяем, есть ли видео
-    video_exists = await session.scalar(
-        select(Video.id).where(Video.id == video_id)
-    )
-    if not video_exists:
-        raise HTTPException(status_code=404, detail="Video not found")
-
-    # Проверяем, есть ли лайк
-    like = await session.scalar(
-        select(VideoLike)
-        .where(
-            VideoLike.video_id == video_id,
-            VideoLike.user_id == user.id,
-        )
-    )
-
-    # Лайк уже есть - снимаем
     if like:
-        await session.execute(
-            delete(VideoLike)
-            .where(VideoLike.id == like.id)
-        )
+        # снимаем лайк
+        await session.delete(like)
         await session.execute(
             update(Video)
-            .where(Video.id == video_id)
+            .where(Video.id == video.id)
             .values(likes=Video.likes - 1)
         )
         await session.commit()
-
         return {"liked": False}
 
-    # Лайка нет - ставим
+    # ставим лайк
     session.add(
-        VideoLike(user_id=user.id, video_id=video_id)
+        VideoLike(user_id=user.id, video_id=video.id)
     )
     await session.execute(
         update(Video)
-        .where(Video.id == video_id)
+        .where(Video.id == video.id)
         .values(likes=Video.likes + 1)
     )
     await session.commit()
@@ -242,15 +213,31 @@ async def toggle_like(
 # Получить статус лайка для пользователя
 @app.get("/video/{video_id}/like")
 async def is_liked(
-    video_id: int,
+    like: VideoLike | None = Depends(get_user_video_like),
+):
+    return {"liked": like is not None}
+
+# Оставить комментарии под видео
+@app.post(
+    "/{video_id}/comments",
+    response_model=CommentOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_comment(
+    data: CommentCreate,
+    video: Video = Depends(get_video_or_404),
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    liked = await session.scalar(
-        select(VideoLike.id)
-        .where(
-            VideoLike.video_id == video_id,
-            VideoLike.user_id == user.id,
-        )
+    comment = Comment(
+        text=data.text,
+        user_id=user.id,
+        video_id=video.id,
     )
-    return {"liked": bool(liked)}
+
+    session.add(comment)
+    await session.commit()
+    await session.refresh(comment)
+
+    return comment
+

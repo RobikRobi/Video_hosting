@@ -1,3 +1,4 @@
+import datetime
 from pydantic import BaseModel
 from src.models.UserModel import User
 
@@ -14,6 +15,21 @@ class VideoShow(BaseModel):
     views: int
     likes: int
     author: UserShow
+
+    class Config:
+        from_attributes = True
+
+
+class CommentCreate(BaseModel):
+    text: str
+
+
+class CommentOut(BaseModel):
+    id: int
+    text: str
+    created_at: datetime.datetime
+    user_id: int
+    video_id: int
 
     class Config:
         from_attributes = True
