@@ -7,15 +7,17 @@ from src.config import config
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete, func
-from sqlalchemy.orm import selectinload
+from sqlalchemy import update, func
 from src.db import get_session
-from src.media.media_utillits import file_iterator, get_video_or_404, get_video_owned_by_user, get_user_video_like
+from src.media.media_utillits import file_iterator, get_video_or_404, get_video_owned_by_user
+from src.media.media_utillits import get_user_video_like, get_user_channel, get_comment_or_404
+from src.media.media_utillits import check_comment_owner
 from src.get_current_user import get_current_user
 from src.models.UserModel import User
 from src.models.VideoModel import Video, VideoLike
 from src.models.CommentModel import Comment
-from src.media.media_shema import VideoShow, CommentCreate, CommentOut
+from src.models.ChannelModel import Channel
+from src.media.media_shema import VideoShow, CommentCreate, CommentOut, CommentUpdate
 
 
 
@@ -31,9 +33,10 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 @app.post("/upload")
 async def upload_video(
     title: str = Form(...),
-    file: UploadFile = File(...),
     description: str = Form(...),
+    file: UploadFile = File(...),
     user: User = Depends(get_current_user),
+    channel: Channel = Depends(get_user_channel),
     session: AsyncSession = Depends(get_session),
 ):
     ext = pathlib.Path(file.filename).suffix.lower()
@@ -48,10 +51,13 @@ async def upload_video(
             while chunk := await file.read(1024 * 1024):
                 await f.write(chunk)
 
-        video = Video(title=title, 
-                      description=description, 
-                      url=f"/video/{new_name}", 
-                      author_id=user.id)
+        video = Video(
+            title=title,
+            description=description,
+            url=f"/video/{new_name}",
+            author_id=user.id,
+            channel_id=channel.id, 
+        )
 
         session.add(video)
         await session.commit()
@@ -70,8 +76,10 @@ async def upload_video(
         "id": video.id,
         "status": "saved",
         "filename": new_name,
-        "url": video.url
+        "url": video.url,
+        "channel_id": channel.id,
     }
+
 
 # Стриминг видео
 @app.get("/video/{video_id}")
@@ -145,16 +153,8 @@ async def stream_video(
     )
 
 # Получение информации о видео
-@app.get("/desc/{video_id}", response_model=VideoShow)
-async def get_video(
-    video: Video = Depends(get_video_or_404),
-    session: AsyncSession = Depends(get_session)
-):
-    # stmt = select(Video).where(Video.id==video_id).options(selectinload(Video.author))
-    # video = await session.scalar(stmt)
-    # if not video:
-    #     raise HTTPException(status_code=404, detail="Video not found")
-
+@app.get("/info/{video_id}", response_model=VideoShow)
+async def get_video(video: Video = Depends(get_video_or_404)):
     return video
 
 # Удаление видео по id
@@ -218,16 +218,12 @@ async def is_liked(
     return {"liked": like is not None}
 
 # Оставить комментарии под видео
-@app.post(
-    "/{video_id}/comments",
-    response_model=CommentOut,
-    status_code=status.HTTP_201_CREATED,
-)
+@app.post("/{video_id}/comments", response_model=CommentOut, status_code=status.HTTP_201_CREATED)
 async def create_comment(
     data: CommentCreate,
     video: Video = Depends(get_video_or_404),
     user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_session)
 ):
     comment = Comment(
         text=data.text,
@@ -241,3 +237,25 @@ async def create_comment(
 
     return comment
 
+# Редактировать комментарий к видео
+@app.patch("/comments/{comment_id}", response_model=CommentOut)
+async def update_comment(
+    data: CommentUpdate,
+    comment: Comment = Depends(check_comment_owner),
+    session: AsyncSession = Depends(get_session),
+):
+    comment.text = data.text
+
+    await session.commit()
+    await session.refresh(comment)
+
+    return comment
+
+# Удаление комментария
+@app.delete("/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_comment(
+    comment: Comment = Depends(check_comment_owner),
+    session: AsyncSession = Depends(get_session),
+):
+    await session.delete(comment)
+    await session.commit()

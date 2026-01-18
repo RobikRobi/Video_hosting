@@ -2,11 +2,14 @@ from typing import Generator
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from src.db import get_session
 from src.get_current_user import get_current_user
 from src.models.VideoModel import Video, VideoLike
 from src.models.UserModel import User
+from src.models.ChannelModel import Channel
+from src.models.CommentModel import Comment
 
 # Генератор чанков файла
 def file_iterator(
@@ -33,11 +36,19 @@ async def get_video_or_404(
     session: AsyncSession = Depends(get_session),
 ) -> Video:
     video = await session.scalar(
-        select(Video).where(Video.id == video_id)
+        select(Video)
+        .where(Video.id == video_id)
+        .options(
+            selectinload(Video.author), 
+            selectinload(Video.channel),
+        )
     )
 
     if not video:
-        raise HTTPException(status_code=404, detail="Video not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found"
+        )
 
     return video
 
@@ -66,3 +77,42 @@ async def get_user_video_like(
             VideoLike.user_id == user.id,
         )
     )
+
+# Получение канала пользователя
+async def get_user_channel(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Channel:
+    channel = await session.scalar(
+        select(Channel).where(Channel.owner_id == user.id)
+    )
+
+    if not channel:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User has no channel"
+        )
+
+    return channel
+
+# Проверка наличия комментария
+async def get_comment_or_404(
+    comment_id: int,
+    session: AsyncSession = Depends(get_session)
+) -> Comment:
+    comment = await session.get(Comment, comment_id)
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    return comment
+
+# Проверка владельца комментария
+def check_comment_owner(
+    comment: Comment = Depends(get_comment_or_404),
+    user: User = Depends(get_current_user),
+) -> Comment:
+    if comment.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can edit only your own comments"
+        )
+    return comment
