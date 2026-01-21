@@ -1,5 +1,6 @@
 import jwt
-from binascii import Error
+from uuid import uuid4
+from hashlib import sha256
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHash
 from jwt import ExpiredSignatureError, InvalidTokenError
@@ -9,9 +10,8 @@ from fastapi import HTTPException
 
 
 
-
+# --------------------------------------Работа с паролем-----------------------------------------------
 ph = PasswordHasher()
-
 
 # хэширование пароля
 async def hash_password(password: str) -> str:
@@ -25,28 +25,56 @@ async def check_password(hashed_password: str, password: str) -> bool:
     except (VerifyMismatchError, InvalidHash):
         return False
 
+# ----------------------------------------Работа с токеном-----------------------------------------
+# Хэш токена
+def hash_refresh_token(token: str) -> str:
+    return sha256(token.encode()).hexdigest()
 
-
-# Создание токена
-async def create_access_token(
-    user_id: int,
-    algorithm: str = config.auth_data.algorithm,
-    private_key: str = config.auth_data.private_key.read_text()
-) -> str:
-    now = datetime.datetime.now(datetime.timezone.utc)
-
+# Создание рефреш токена
+def create_refresh_token(user_id: int) -> str:
     payload = {
-        "sub": str(user_id),                          
-        "iat": now,                                    
-        "exp": now + datetime.timedelta(days=config.auth_data.days)
+        "sub": str(user_id),
+        "jti": str(uuid4()),
+        "type": "refresh",
+        "exp": datetime.datetime.now(datetime.timezone.utc)
+        + datetime.timedelta(days=config.auth_data.days)
     }
 
     token = jwt.encode(
         payload=payload,
-        key=private_key,
-        algorithm=algorithm
+        key=config.auth_data.private_key.read_text(),
+        algorithm=config.auth_data.algorithm
     )
     return token
+
+# Обновление access token
+def decode_refresh_token(token: str) -> dict:
+    payload = jwt.decode(
+        jwt=token,
+        key=config.auth_data.public_key.read_text(),
+        algorithms=[config.auth_data.algorithm]
+    )
+
+    if payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="Invalid token type")
+
+    return payload
+
+# Создание токена
+def create_access_token(user_id: int) -> str:
+    payload = {
+        "sub": str(user_id),
+        "type": "access",
+        "exp": datetime.datetime.now(datetime.timezone.utc)
+        + datetime.timedelta(minutes=config.auth_data.munites)
+    }
+
+    return jwt.encode(
+        payload=payload,
+        key=config.auth_data.private_key.read_text(),
+        algorithm=config.auth_data.algorithm
+    )
+
 
 # Декодирование токена
 async def decode_access_token(

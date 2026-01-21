@@ -9,6 +9,7 @@ if typing.TYPE_CHECKING:
     from src.models.ChannelModel import Subscriptions
     from src.models.VideoModel import Video
     from src.models.CommentModel import Comment
+    from src.models.TokenModel import RefreshToken
     
     
 
@@ -37,6 +38,11 @@ class User(Base):
     # Подписки пользователя
     subscriptions: Mapped[list["Subscriptions"]] = relationship(back_populates="user", 
                                                           cascade="all, delete-orphan")
+    
+    # Refresh токен
+    refresh_tokens: Mapped[list["RefreshToken"]] = relationship("RefreshToken", 
+                                                                back_populates="user",
+                                                                cascade="all, delete-orphan")
 
 
 

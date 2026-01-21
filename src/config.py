@@ -9,6 +9,7 @@ class AuthData(BaseModel):
     private_key: Path = BASE_DIR /"src"/"auth"/"tokens"/"private_key.pem"
     public_key: Path = BASE_DIR /"src"/"auth"/"tokens"/"public_key.pem"
     algorithm: str = 'RS256'
+    munites: int = 15
     days: int = 7
 
 

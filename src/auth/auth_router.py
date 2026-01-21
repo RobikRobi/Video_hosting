@@ -8,11 +8,14 @@ from src.models.UserModel import User
 from src.auth.auth_shema import RegisterUser, ShowUser, LoginUser
 from fastapi import HTTPException
 from src.db import get_session
+from src.config import config
 from src.auth.auth_utilits import create_access_token, hash_password, check_password
+from src.auth.auth_utilits import create_refresh_token, hash_refresh_token, decode_refresh_token
 from src.get_current_user import get_current_user
 from src.celery_app import send_email
 from src.auth.auth_shema import PasswordResetRequest, PasswordResetConfirm
 from src.models.UserModel import PasswordResetToken
+from src.models.TokenModel import RefreshToken
 
 app = APIRouter(prefix="/users", tags=["Users"])
 
@@ -23,23 +26,79 @@ async def me(me = Depends(get_current_user)):
 
 # Авторизация пользователя
 @app.post("/login")
-async def login_user(data:LoginUser,session:AsyncSession = Depends(get_session)):
+async def login(
+    data: LoginUser,
+    session: AsyncSession = Depends(get_session)
+):
+    stmt = select(User).where(User.email == data.email)
+    result = await session.execute(stmt)
+    user = result.scalar_one_or_none()
 
-    user = await session.scalar(select(User).where(User.email == data.email))
+    if not user or not check_password(data.password, user.password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+    access_token = create_access_token(user.id)
+    refresh_token = create_refresh_token(user.id)
 
-    if not await check_password(user.password, data.password):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    
-    token = await create_access_token(user_id=user.id)
+    refresh_db = RefreshToken(
+        user_id=user.id,
+        token_hash=hash_refresh_token(refresh_token),
+        expires_at=datetime.utcnow()
+        + timedelta(days=config.auth_data.days)
+    )
+    session.add(refresh_db)
+    await session.commit()
 
     return {
-        "access_token": token,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer"
     }
 
+# Рефреш токен
+@app.post("/refresh")
+async def refresh(
+    refresh_token: str,
+    session: AsyncSession = Depends(get_session)
+):
+    payload = decode_refresh_token(refresh_token)
+
+    token_hash = hash_refresh_token(refresh_token)
+
+    stmt = select(RefreshToken).where(
+        RefreshToken.token_hash == token_hash,
+        RefreshToken.revoked == False
+    )
+    result = await session.execute(stmt)
+    token_db = result.scalar_one_or_none()
+
+    if not token_db:
+        raise HTTPException(status_code=401, detail="Token revoked")
+
+    # revoke old refresh
+    token_db.revoked = True
+
+    # create new tokens
+    user_id = int(payload["sub"])
+    new_access = create_access_token(user_id)
+    new_refresh = create_refresh_token(user_id)
+
+    session.add(
+        RefreshToken(
+            user_id=user_id,
+            token_hash=hash_refresh_token(new_refresh),
+            expires_at=datetime.utcnow()
+            + timedelta(days=config.auth_data.days)
+        )
+    )
+
+    await session.commit()
+
+    return {
+        "access_token": new_access,
+        "refresh_token": new_refresh,
+        "token_type": "bearer"
+    }
 
 subject = "Регистрация на сайте VideoHosting"
 text = """
@@ -80,7 +139,7 @@ async def register_user(data:RegisterUser, session:AsyncSession = Depends(get_se
     await session.commit()
     send_email.delay(user.email, subject, text)
         
-    user_token = await create_access_token(user_id=user_id)
+    user_token = create_access_token(user_id=user_id)
     data_dict["token"] = user_token  
         
     return data_dict
@@ -147,3 +206,26 @@ async def password_reset_confirm(
     await session.commit()
 
     return {"status": "password updated"}
+
+
+@app.post("/logout")
+async def logout(
+    refresh_token: str,
+    session: AsyncSession = Depends(get_session)
+):
+    token_hash = hash_refresh_token(refresh_token)
+
+    stmt = select(RefreshToken).where(
+        RefreshToken.token_hash == token_hash,
+        RefreshToken.revoked == False
+    )
+    result = await session.execute(stmt)
+    token_db = result.scalar_one_or_none()
+
+    if not token_db:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    token_db.revoked = True
+    await session.commit()
+
+    return {"detail": "Logged out successfully"}

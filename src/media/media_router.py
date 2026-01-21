@@ -3,11 +3,11 @@ import pathlib
 import uuid
 import aiofiles
 # import dropbox
-from src.config import config
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import update, func
+from sqlalchemy import update, func, select
+from sqlalchemy.orm import selectinload
 from src.db import get_session
 from src.media.media_utillits import file_iterator, get_video_or_404, get_video_owned_by_user
 from src.media.media_utillits import get_user_video_like, get_user_channel, get_comment_or_404
@@ -237,12 +237,45 @@ async def create_comment(
 
     return comment
 
+# Получение всех комментариев под видео
+@app.get(
+    "/{video_id}/comments",
+    response_model=list[CommentOut],
+    status_code=status.HTTP_200_OK
+)
+async def get_video_comments(
+    video: Video = Depends(get_video_or_404),
+    session: AsyncSession = Depends(get_session)
+):
+    stmt = (
+        select(Comment)
+        .where(Comment.video_id == video.id)
+        .options(
+            selectinload(Comment.user)  # автор комментария
+        )
+        .order_by(Comment.created_at.asc())
+    )
+
+    result = await session.scalars(stmt)
+    comments = result.all()
+
+    return comments
+
+# Получение комментария по id
+@app.get("/comments/{comment_id}", response_model=CommentOut)
+async def get_comment(
+    comment: Comment = Depends(get_comment_or_404),
+    session: AsyncSession = Depends(get_session)
+):
+    return comment
+
+
 # Редактировать комментарий к видео
 @app.patch("/comments/{comment_id}", response_model=CommentOut)
 async def update_comment(
     data: CommentUpdate,
     comment: Comment = Depends(check_comment_owner),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_session)
 ):
     comment.text = data.text
 
