@@ -1,5 +1,7 @@
 import typing
 import datetime
+import uuid
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import ForeignKey, Text
 from sqlalchemy import func
@@ -20,7 +22,7 @@ class Comment(Base):
     # Связи
     # Связи с таблицами User и Video
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"))
-    video_id: Mapped[int] = mapped_column(ForeignKey("video.id"))
+    video_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("video.id"))
 
     user: Mapped["User"] = relationship(back_populates="comments")
     video: Mapped["Video"] = relationship(back_populates="comments")

@@ -1,4 +1,6 @@
 import typing
+import uuid
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import ForeignKey, BigInteger, UniqueConstraint
 from src.db import Base
@@ -13,7 +15,7 @@ if typing.TYPE_CHECKING:
 class Video(Base):
     __tablename__="video"
 
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title:Mapped[str] = mapped_column(nullable=False)
     description: Mapped[str] = mapped_column(nullable=False)
     url: Mapped[str] = mapped_column(nullable=False)
@@ -31,9 +33,11 @@ class Video(Base):
     comments: Mapped[list["Comment"]] = relationship(back_populates="video", 
                                                      cascade="all, delete-orphan")
     # Канал, где размещено видео
-    channel_id: Mapped[int] = mapped_column(ForeignKey("channel.id", ondelete="CASCADE"),
-                                            nullable=False,
-                                            index=True)
+    channel_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), 
+                                                  ForeignKey("channel.id", ondelete="CASCADE"),
+                                                  nullable=False,
+                                                  index=True)
+    
     channel: Mapped["Channel"] = relationship(back_populates="videos")
 
 # таблица-модель (join entity)
@@ -46,7 +50,7 @@ class VideoLike(Base):
         index=True,
         nullable=False
     )
-    video_id: Mapped[int] = mapped_column(
+    video_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True),
         ForeignKey("video.id", ondelete="CASCADE"),
         index=True,
         nullable=False

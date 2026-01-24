@@ -1,5 +1,7 @@
 import typing
 import datetime
+import uuid
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import ForeignKey
 from sqlalchemy import func
@@ -15,7 +17,7 @@ if typing.TYPE_CHECKING:
 class Channel(Base):
     __tablename__ = "channel"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title: Mapped[str] = mapped_column(nullable=False)
     description:Mapped[str] = mapped_column(nullable=False)
     img: Mapped[str]  = mapped_column(nullable=True)
@@ -41,8 +43,9 @@ class Subscriptions(Base):
 
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), 
                                          primary_key=True)
-    channel_id: Mapped[int] = mapped_column(ForeignKey("channel.id", ondelete="CASCADE"),
-                                            primary_key=True)
+    channel_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True),
+                                                  ForeignKey("channel.id", ondelete="CASCADE"),
+                                                  primary_key=True)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="subscriptions")
