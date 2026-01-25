@@ -1,3 +1,4 @@
+from uuid import UUID
 from typing import Generator
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,7 +33,7 @@ def file_iterator(
 
 # Функция для проверки наличия видео в БД
 async def get_video_or_404(
-    video_id: int,
+    video_id: UUID,
     session: AsyncSession = Depends(get_session),
 ) -> Video:
     video = await session.scalar(

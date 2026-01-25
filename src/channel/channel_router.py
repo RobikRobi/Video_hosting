@@ -2,13 +2,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 from src.db import get_session
 from src.get_current_user import get_current_user
 from src.channel.channel_shema import CreateChannel, ShowChannel, SubscriptionChannelOut, ChannelUpdate
 from src.models.UserModel import User
 from src.models.ChannelModel import Channel, Subscriptions
-
+from src.channel.channel_utillits import get_channel_or_404, get_owned_channel
 
 
 app = APIRouter(prefix="/channel", tags=["Channel"])
@@ -47,41 +46,16 @@ async def create_channel(
 
 # получение канала по id
 @app.get("/{channel_id}", response_model=ShowChannel)
-async def get_channel(
-    channel_id: UUID, 
-    session: AsyncSession = Depends(get_session)):
-    stmt = select(Channel).where(Channel.id == channel_id).options(selectinload(Channel.owner))
-    channel = await session.scalar(stmt)
-
-    if not channel:
-        raise HTTPException(status_code=400, detail="Channel not found")
+async def get_channel(channel: Channel = Depends(get_channel_or_404)):
     return channel
 
 # Редактирование канала
 @app.put("/{channel_id}", response_model=ShowChannel)
 async def update_channel(
     data: ChannelUpdate,
-    channel_id: UUID,
-    user: User = Depends(get_current_user),
+    channel: Channel = Depends(get_owned_channel),
     session: AsyncSession = Depends(get_session),
 ):
-    stmt = (
-        select(Channel)
-        .where(Channel.id == channel_id)
-        .options(selectinload(Channel.owner))
-    )
-
-    channel = await session.scalar(stmt)
-
-    if not channel:
-        raise HTTPException(status_code=404, detail="Channel not found")
-
-    if channel.owner_id != user.id:
-        raise HTTPException(
-            status_code=403,
-            detail="You are not allowed to edit this channel"
-        )
-
     update_data = data.model_dump(exclude_unset=True)
 
     if not update_data:
@@ -90,85 +64,44 @@ async def update_channel(
     for field, value in update_data.items():
         setattr(channel, field, value)
 
-    try:
-        await session.commit()
-        await session.refresh(channel)
-        return channel
-
-    except Exception:
-        await session.rollback()
-        raise HTTPException(status_code=500, detail="Failed to update channel")
-
-
+    await session.commit()
+    await session.refresh(channel)
+    return channel
 
 
 # Удаление канала по id
 @app.delete("/{channel_id}", status_code=204)
 async def delete_channel(
-    channel_id: UUID,
-    user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session)):
-    result = await session.execute(
-        select(Channel).where(Channel.id == channel_id)
-    )
-    channel = result.scalar_one_or_none()
-
-    if not channel:
-        raise HTTPException(status_code=404, detail="Video not found")
-
-    # Проверка владельца
-    if channel.owner_id != user.id:
-        raise HTTPException(status_code=403, detail="You are not allowed to delete this channel")
-
-    try:
-        # Удаляем запись из БД
-        await session.delete(channel)
-        await session.commit()
-
-    except Exception:
-        await session.rollback()
-        raise HTTPException(status_code=500, detail="Failed to delete channel")
-
-    return None
+    channel: Channel = Depends(get_owned_channel),
+    session: AsyncSession = Depends(get_session),
+):
+    await session.delete(channel)
+    await session.commit()
 
 
 # Подписка на канал
 @app.post("/{channel_id}/subscribe")
-async def subscribe_to_channel(channel_id: UUID,
-                  user: User = Depends(get_current_user),
-                  session: AsyncSession = Depends(get_session)):
-    # Проверяем, существует ли канал
-    channel = await session.get(Channel, channel_id)
-    if not channel:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Channel not found",
-        )
-    # Запрещаем подписку на свой канал
+async def subscribe_to_channel(
+    channel: Channel = Depends(get_channel_or_404),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     if channel.owner_id == user.id:
-        raise HTTPException(
-            tatus_code=status.HTTP_400_BAD_REQUEST,
-            detail="You cannot subscribe to your own channel",
-        )
-    # Проверяем, есть ли уже подписка
+        raise HTTPException(400, "You cannot subscribe to your own channel")
+
     result = await session.execute(
         select(Subscriptions).where(
             Subscriptions.user_id == user.id,
-            Subscriptions.channel_id == channel_id
+            Subscriptions.channel_id == channel.id
         )
     )
-    existing_subscription = result.scalar_one_or_none()
-    if existing_subscription:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You are already subscribed to this channel",
-        )
-    # Делаем подписку на канал
-    subscription = Subscriptions(user_id = user.id, channel_id = channel_id)
-    session.add(subscription)
+    if result.scalar_one_or_none():
+        raise HTTPException(400, "Already subscribed")
+
+    session.add(Subscriptions(user_id=user.id, channel_id=channel.id))
     await session.commit()
 
-    return {"message": "Successfully subscribed"}
+    return {"message": "Subscribed"}
 
 
 # Отписка от канала

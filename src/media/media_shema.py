@@ -1,3 +1,4 @@
+from uuid import UUID
 import datetime
 from pydantic import BaseModel
 from src.models.UserModel import User
@@ -11,7 +12,7 @@ class UserShow(BaseModel):
 
 
 class ChannelShow(BaseModel):
-    id: int
+    id: UUID
     title: str
 
     class Config:
@@ -37,7 +38,7 @@ class CommentUpdate(BaseModel):
     text: str
 
 class CommentOut(BaseModel):
-    id: int
+    id: UUID
     text: str
     created_at: datetime.datetime
     user_id: int
