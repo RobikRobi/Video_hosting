@@ -1,10 +1,11 @@
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from src.db import get_session
 from src.get_current_user import get_current_user
-from src.channel.channel_shema import CreateChannel, ShowChannel, SubscriptionChannelOut
+from src.channel.channel_shema import CreateChannel, ShowChannel, SubscriptionChannelOut, ChannelUpdate
 from src.models.UserModel import User
 from src.models.ChannelModel import Channel, Subscriptions
 
@@ -47,7 +48,7 @@ async def create_channel(
 # получение канала по id
 @app.get("/{channel_id}", response_model=ShowChannel)
 async def get_channel(
-    channel_id: int, 
+    channel_id: UUID, 
     session: AsyncSession = Depends(get_session)):
     stmt = select(Channel).where(Channel.id == channel_id).options(selectinload(Channel.owner))
     channel = await session.scalar(stmt)
@@ -56,10 +57,55 @@ async def get_channel(
         raise HTTPException(status_code=400, detail="Channel not found")
     return channel
 
+# Редактирование канала
+@app.put("/{channel_id}", response_model=ShowChannel)
+async def update_channel(
+    data: ChannelUpdate,
+    channel_id: UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    stmt = (
+        select(Channel)
+        .where(Channel.id == channel_id)
+        .options(selectinload(Channel.owner))
+    )
+
+    channel = await session.scalar(stmt)
+
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    if channel.owner_id != user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not allowed to edit this channel"
+        )
+
+    update_data = data.model_dump(exclude_unset=True)
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    for field, value in update_data.items():
+        setattr(channel, field, value)
+
+    try:
+        await session.commit()
+        await session.refresh(channel)
+        return channel
+
+    except Exception:
+        await session.rollback()
+        raise HTTPException(status_code=500, detail="Failed to update channel")
+
+
+
+
 # Удаление канала по id
 @app.delete("/{channel_id}", status_code=204)
 async def delete_channel(
-    channel_id: int,
+    channel_id: UUID,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)):
     result = await session.execute(
@@ -88,7 +134,7 @@ async def delete_channel(
 
 # Подписка на канал
 @app.post("/{channel_id}/subscribe")
-async def subscribe_to_channel(channel_id: int,
+async def subscribe_to_channel(channel_id: UUID,
                   user: User = Depends(get_current_user),
                   session: AsyncSession = Depends(get_session)):
     # Проверяем, существует ли канал
@@ -127,7 +173,7 @@ async def subscribe_to_channel(channel_id: int,
 
 # Отписка от канала
 @app.delete("/{channel_id}/subscribe", status_code=status.HTTP_200_OK)
-async def unsubscribe_from_channel(channel_id: int, 
+async def unsubscribe_from_channel(channel_id: UUID, 
                                    user: User = Depends(get_current_user),
                                    session: AsyncSession = Depends(get_session)):
     result = await session.execute(

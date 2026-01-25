@@ -1,4 +1,5 @@
 import datetime
+from uuid import UUID
 from pydantic import BaseModel, Field
 from src.media.media_shema import UserShow
 
@@ -21,7 +22,7 @@ class ShowChannel(BaseModel):
 
 # Схема для получения списка подписок пользователя
 class SubscriptionChannelOut(BaseModel):
-    channel_id: int
+    channel_id: UUID
     title: str
     description: str
     img: str | None
@@ -29,3 +30,8 @@ class SubscriptionChannelOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+class ChannelUpdate(BaseModel):
+    title: str | None 
+    description: str | None
+    img: str | None = None
