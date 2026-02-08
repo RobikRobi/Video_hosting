@@ -22,10 +22,12 @@ class EnvData(BaseSettings):
     SMTP_PASSWORD: str
     REDIS_HOST: str
     REDIS_PORT: int
-    # ACCESS_TOKEN: str
+    DROPBOX_REFRESH_TOKEN: str
+    DROPBOX_APP_KEY: str
+    DROPBOX_APP_SECRET: str
 
-    # model_config = SettingsConfigDict(env_file=".env.local")
-    model_config = SettingsConfigDict(env_file=".env.prod")
+    model_config = SettingsConfigDict(env_file=".env.local")
+    # model_config = SettingsConfigDict(env_file=".env.prod")
 
 class Config(BaseModel):
     env_data:EnvData = EnvData()

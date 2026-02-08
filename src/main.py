@@ -1,4 +1,3 @@
-import typing
 from binascii import Error
 from fastapi import FastAPI
 from src.db import engine,Base

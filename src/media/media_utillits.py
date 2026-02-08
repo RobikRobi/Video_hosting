@@ -12,6 +12,9 @@ from src.models.UserModel import User
 from src.models.ChannelModel import Channel
 from src.models.CommentModel import Comment
 
+
+
+
 # Генератор чанков файла
 def file_iterator(
     file_path: str,
