@@ -35,60 +35,6 @@ dbx = dropbox.Dropbox(
 )
 
 CHUNK_SIZE = 4 * 1024 * 1024
-# UPLOAD_DIR = pathlib.Path("videos")
-# UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-
-# # Загрузка видео
-# @app.post("/upload")
-# async def upload_video(
-#     title: str = Form(...),
-#     description: str = Form(...),
-#     file: UploadFile = File(...),
-#     user: User = Depends(get_current_user),
-#     channel: Channel = Depends(get_user_channel),
-#     session: AsyncSession = Depends(get_session),
-# ):
-#     ext = pathlib.Path(file.filename).suffix.lower()
-#     if ext != ".mp4":
-#         raise HTTPException(status_code=400, detail="Only MP4 files are allowed")
-
-#     new_name = f"{uuid.uuid4()}{ext}"
-#     dist = UPLOAD_DIR / new_name
-
-#     try:
-#         async with aiofiles.open(dist, "wb") as f:
-#             while chunk := await file.read(1024 * 1024):
-#                 await f.write(chunk)
-
-#         video = Video(
-#             title=title,
-#             description=description,
-#             url=f"/video/{new_name}",
-#             author_id=user.id,
-#             channel_id=channel.id, 
-#         )
-
-#         session.add(video)
-#         await session.commit()
-#         await session.refresh(video)
-
-#     except Exception:
-#         await session.rollback()
-#         if dist.exists():
-#             dist.unlink()
-#         raise
-
-#     finally:
-#         await file.close()
-
-#     return {
-#         "id": video.id,
-#         "status": "saved",
-#         "filename": new_name,
-#         "url": video.url,
-#         "channel_id": channel.id,
-#     }
 
 # Функция для загрузки видео на dropbox
 async def upload_to_dropbox(file: UploadFile, dropbox_path: str) -> str:
@@ -151,32 +97,6 @@ async def upload_video(
 
     finally:
         await file.close()
-
-# @app.post("/save")
-# async def upload_video(title:str, description:str, channel_id:uuid.UUID,file:UploadFile = File(...),session:AsyncSession = Depends(get_session)):
-#   ext = pathlib.Path(file.filename).suffix.lower()
-#   if ext not in [".mp4"]:
-#    raise HTTPException(400)
-#   uuids = uuid.uuid4()
-#   new_name = f"{uuids}{ext}"
-#   dist = UPLOAD_DIR / new_name
-
-
-#   async with aiofiles.open(dist,"wb") as f:
-#    while True:
-#     chunk = await file.read(1024*1024*1024) # 1 *1024 = 1кб *1024 = 1мб
-#     if not chunk:
-#      break
-#     await f.write(chunk)
-#   await file.close()
-
-#   video = Video.Video(id = uuids, title = title, description = description, channel_id = channel_id)
-#   session.add(video)
-#   await session.commit()
-#   await session.refresh(video)
-
-#   return video
-
 
 # Стриминг видео
 @app.get("/video/{video_id}")
@@ -271,6 +191,26 @@ async def get_video_stream(
 #         },
 #     )
 
+
+# Фильтрация видео
+@app.get("/filter")
+async def filters(title:str=None, 
+                  description:str=None, 
+                  session: AsyncSession = Depends(get_session)):
+     if not title and not description:
+         videos = await session.scalars(select(Video))
+     elif not title:
+         videos = await session.scalars(select(Video).
+                                 filter(Video.description.ilike(f"%{description}%")))
+     elif not description:
+         videos = await session.scalars(select(Video).
+                                 filter(Video.title.ilike(f"%{title}%")))
+     else:
+         videos = await session.scalars(select(Video).
+                                 filter(Video.description.ilike(f"%{title}%")), 
+                                 (Video.description.ilike(f"%{description}%")))
+     
+     return videos.all()
 # Получение информации о видео
 @app.get("/info/{video_id}", response_model=VideoShow)
 async def get_video(video: Video = Depends(get_video_or_404)):
