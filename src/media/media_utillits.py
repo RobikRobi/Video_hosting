@@ -4,6 +4,8 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+from dropbox.exceptions import ApiError
+import dropbox
 
 from src.db import get_session
 from src.get_current_user import get_current_user
@@ -13,6 +15,15 @@ from src.models.ChannelModel import Channel
 from src.models.CommentModel import Comment
 
 
+
+
+
+
+dbx = dropbox.Dropbox(
+    oauth2_refresh_token=config.env_data.DROPBOX_REFRESH_TOKEN,
+    app_key=config.env_data.DROPBOX_APP_KEY,
+    app_secret=config.env_data.DROPBOX_APP_SECRET,
+)
 
 
 # Генератор чанков файла
@@ -120,3 +131,4 @@ def check_comment_owner(
             detail="You can edit only your own comments"
         )
     return comment
+

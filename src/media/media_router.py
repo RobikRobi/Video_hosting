@@ -1,4 +1,4 @@
-import os
+import httpx
 import pathlib
 import uuid
 import aiofiles
@@ -15,46 +15,58 @@ from src.config import config
 from src.media.media_utillits import file_iterator, get_video_or_404, get_video_owned_by_user
 from src.media.media_utillits import get_user_video_like, get_user_channel, get_comment_or_404
 from src.media.media_utillits import check_comment_owner
+from src.media.media_utillits import get_or_create_shared_link
 from src.get_current_user import get_current_user
 from src.models.UserModel import User
 from src.models.VideoModel import Video, VideoLike
 from src.models.CommentModel import Comment
 from src.models.ChannelModel import Channel
 from src.media.media_shema import VideoShow, CommentCreate, CommentOut, CommentUpdate
+from src.media.dropbox_service import DropboxStorageService
 
 
 
 
 app = APIRouter(prefix="/media", tags=["Media"])
 
-# app = APIRouter(prefix="/videos", tags=["Videos"])
-dbx = dropbox.Dropbox(
-    oauth2_refresh_token=config.env_data.DROPBOX_REFRESH_TOKEN,
+
+dropbox_service = DropboxStorageService(
+    refresh_token=config.env_data.DROPBOX_REFRESH_TOKEN,
     app_key=config.env_data.DROPBOX_APP_KEY,
     app_secret=config.env_data.DROPBOX_APP_SECRET,
 )
 
-CHUNK_SIZE = 4 * 1024 * 1024
+# # app = APIRouter(prefix="/videos", tags=["Videos"])
+# dbx = dropbox.Dropbox(
+#     oauth2_refresh_token=config.env_data.DROPBOX_REFRESH_TOKEN,
+#     app_key=config.env_data.DROPBOX_APP_KEY,
+#     app_secret=config.env_data.DROPBOX_APP_SECRET,
+# )
 
+CHUNK_SIZE = 4 * 1024 * 1024
 # Функция для загрузки видео на dropbox
 async def upload_to_dropbox(file: UploadFile, dropbox_path: str) -> str:
     first_chunk = await file.read(CHUNK_SIZE)
 
-    session = dbx.files_upload_session_start(first_chunk)
+    session = dropbox_service.files_upload_session_start(first_chunk)
     cursor = dropbox.files.UploadSessionCursor(
         session_id=session.session_id,
         offset=len(first_chunk),
     )
 
     while chunk := await file.read(CHUNK_SIZE):
-        dbx.files_upload_session_append_v2(chunk, cursor)
+        dropbox_service.files_upload_session_append_v2(chunk, cursor)
         cursor.offset += len(chunk)
 
     commit = dropbox.files.CommitInfo(path=dropbox_path, mode=WriteMode.overwrite)
-    dbx.files_upload_session_finish(b"", cursor, commit)
+    dropbox_service.files_upload_session_finish(b"", cursor, commit)
 
-    shared = dbx.sharing_create_shared_link_with_settings(dropbox_path)
+    shared = dropbox_service.sharing_create_shared_link_with_settings(dropbox_path)
     return shared.url.replace("?dl=0", "?raw=1")
+
+
+
+
 
 # Загрузка видео в dropbox
 @app.post("/save", status_code=201)
@@ -74,7 +86,9 @@ async def upload_video(
     dropbox_path = f"/videos/{video_id}{ext}"
 
     try:
-        dropbox_url = await upload_to_dropbox(file, dropbox_path)
+        await upload_to_dropbox(file, dropbox_path)
+
+        dropbox_url = get_or_create_shared_link(dropbox_path)
 
         video = Video(
             id=video_id,
@@ -82,6 +96,7 @@ async def upload_video(
             description=description,
             channel_id=channel_id,
             url=dropbox_url,
+            storage_path=dropbox_path,
             author_id=user.id,
         )
 
@@ -98,98 +113,21 @@ async def upload_video(
     finally:
         await file.close()
 
+
 # Стриминг видео
 @app.get("/video/{video_id}")
-async def get_video_stream(
-    video: Video = Depends(get_video_or_404),
-    session: AsyncSession = Depends(get_session),
-):
-    # увеличиваем просмотры
-    await session.execute(
-        update(Video)
-        .where(Video.id == video.id)
-        .values(views=func.coalesce(Video.views, 0) + 1)
+async def stream_video(video: Video = Depends(get_video_or_404)):
+
+    async def iter_video():
+        async with httpx.AsyncClient() as client:
+            async with client.stream("GET", video.url) as response:
+                async for chunk in response.aiter_bytes():
+                    yield chunk
+
+    return StreamingResponse(
+        iter_video(),
+        media_type="video/mp4"
     )
-    await session.commit()
-
-    # редирект на Dropbox CDN
-    return RedirectResponse(
-        url=video.url,
-        status_code=302
-    )
-
-
-
-# Стриминг видео
-# @app.get("/video/{video_id}")
-# async def stream_video(
-#     request: Request,
-#     video: Video = Depends(get_video_or_404),
-#     session: AsyncSession = Depends(get_session),
-# ):
-#     # 1. Проверяем наличие файла
-#     file_path = UPLOAD_DIR / pathlib.Path(video.url).name
-
-#     if not file_path.exists():
-#         raise HTTPException(
-#             status_code=status.HTTP_404_NOT_FOUND,
-#             detail="Video file not found",
-#         )
-
-#     file_size = os.path.getsize(file_path)
-#     range_header = request.headers.get("range")
-
-#     # 2. Инкремент просмотров (без race condition)
-#     await session.execute(
-#         update(Video)
-#         .where(Video.id == video.id)
-#         .values(views=func.coalesce(Video.views, 0) + 1)
-#     )
-#     await session.commit()
-
-#     # 3. Если Range нет — отдаём весь файл
-#     if not range_header:
-#         return StreamingResponse(
-#             file_iterator(str(file_path), 0, file_size - 1),
-#             media_type="video/mp4",
-#             headers={
-#                 "Content-Length": str(file_size),
-#                 "Accept-Ranges": "bytes",
-#             },
-#         )
-
-#     # 4. Парсим Range
-#     try:
-#         _, range_value = range_header.split("=")
-#         start_str, end_str = range_value.split("-")
-#         start = int(start_str)
-#         end = int(end_str) if end_str else file_size - 1
-#     except ValueError:
-#         raise HTTPException(
-#             status_code=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE,
-#             detail="Invalid Range header",
-#         )
-
-#     if start >= file_size:
-#         raise HTTPException(
-#             status_code=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE,
-#             detail="Range not satisfiable",
-#         )
-
-#     end = min(end, file_size - 1)
-#     content_length = end - start + 1
-
-#     # 5. Частичный контент
-#     return StreamingResponse(
-#         file_iterator(str(file_path), start, end),
-#         status_code=status.HTTP_206_PARTIAL_CONTENT,
-#         media_type="video/mp4",
-#         headers={
-#             "Content-Range": f"bytes {start}-{end}/{file_size}",
-#             "Accept-Ranges": "bytes",
-#             "Content-Length": str(content_length),
-#         },
-#     )
 
 
 # Фильтрация видео
@@ -217,25 +155,28 @@ async def get_video(video: Video = Depends(get_video_or_404)):
     return video
 
 # Удаление видео по id
-# @app.delete("/video/{video_id}", status_code=204)
-# async def delete_video(
-#     video: Video = Depends(get_video_owned_by_user),
-#     session: AsyncSession = Depends(get_session),
-# ):
-#     file_path = UPLOAD_DIR / pathlib.Path(video.url).name
+@app.delete("/video/{video_id}", status_code=204)
+async def delete_video(
+    video: Video = Depends(get_video_owned_by_user),
+    session: AsyncSession = Depends(get_session),
+):
+    try:
+        # 1. удаляем файл в Dropbox
+        dbx.files_delete_v2(video.storage_path)
 
-#     try:
-#         await session.delete(video)
-#         await session.commit()
+        # 2. удаляем запись из БД
+        await session.delete(video)
+        await session.commit()
 
-#         if file_path.exists():
-#             file_path.unlink()
+    except dropbox.exceptions.ApiError as e:
+        await session.rollback()
+        raise HTTPException(500, f"Dropbox delete failed: {e}")
 
-#     except Exception:
-#         await session.rollback()
-#         raise HTTPException(status_code=500, detail="Failed to delete video")
+    except Exception:
+        await session.rollback()
+        raise HTTPException(500, "Failed to delete video")
 
-#     return None
+    return None
 
 # Ставим like
 @app.post("/video/{video_id}/like")
