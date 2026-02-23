@@ -19,6 +19,11 @@ class ChannelShow(BaseModel):
         from_attributes = True
 
 
+class UploadVideoResponse(BaseModel):
+    id: UUID
+    url: str
+
+
 class VideoShow(BaseModel):
     title: str
     description: str

@@ -4,6 +4,7 @@ import uuid
 import aiofiles
 import dropbox
 from dropbox.files import WriteMode
+from dropbox.exceptions import ApiError
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form, Request, status
 from fastapi.responses import StreamingResponse
 from fastapi.responses import RedirectResponse
@@ -15,13 +16,12 @@ from src.config import config
 from src.media.media_utillits import file_iterator, get_video_or_404, get_video_owned_by_user
 from src.media.media_utillits import get_user_video_like, get_user_channel, get_comment_or_404
 from src.media.media_utillits import check_comment_owner
-from src.media.media_utillits import get_or_create_shared_link
 from src.get_current_user import get_current_user
 from src.models.UserModel import User
 from src.models.VideoModel import Video, VideoLike
 from src.models.CommentModel import Comment
 from src.models.ChannelModel import Channel
-from src.media.media_shema import VideoShow, CommentCreate, CommentOut, CommentUpdate
+from src.media.media_shema import VideoShow, CommentCreate, CommentOut, CommentUpdate, UploadVideoResponse
 from src.media.dropbox_service import DropboxStorageService
 
 
@@ -36,12 +36,12 @@ dropbox_service = DropboxStorageService(
     app_secret=config.env_data.DROPBOX_APP_SECRET,
 )
 
-# # app = APIRouter(prefix="/videos", tags=["Videos"])
-# dbx = dropbox.Dropbox(
-#     oauth2_refresh_token=config.env_data.DROPBOX_REFRESH_TOKEN,
-#     app_key=config.env_data.DROPBOX_APP_KEY,
-#     app_secret=config.env_data.DROPBOX_APP_SECRET,
-# )
+app = APIRouter(prefix="/videos", tags=["Videos"])
+dbx = dropbox.Dropbox(
+    oauth2_refresh_token=config.env_data.DROPBOX_REFRESH_TOKEN,
+    app_key=config.env_data.DROPBOX_APP_KEY,
+    app_secret=config.env_data.DROPBOX_APP_SECRET,
+)
 
 CHUNK_SIZE = 4 * 1024 * 1024
 # Функция для загрузки видео на dropbox
@@ -64,6 +64,22 @@ async def upload_to_dropbox(file: UploadFile, dropbox_path: str) -> str:
     shared = dropbox_service.sharing_create_shared_link_with_settings(dropbox_path)
     return shared.url.replace("?dl=0", "?raw=1")
 
+# Функция для получения ссылки с Dropbox
+def get_or_create_shared_link(path: str) -> str:
+    try:
+        link = dbx.sharing_create_shared_link_with_settings(path)
+        url = link.url
+    except ApiError as e:
+        if isinstance(e.error, dropbox.sharing.CreateSharedLinkWithSettingsError):
+            if e.error.is_shared_link_already_exists():
+                links = dbx.sharing_list_shared_links(path=path, direct_only=True)
+                url = links.links[0].url
+            else:
+                raise
+        else:
+            raise
+
+    return url.replace("?dl=0", "?raw=1")
 
 
 
@@ -112,6 +128,7 @@ async def upload_video(
 
     finally:
         await file.close()
+
 
 
 # Стриминг видео
