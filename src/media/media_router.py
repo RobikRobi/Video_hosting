@@ -122,75 +122,18 @@ async def get_video_stream(
 
 # Стриминг видео
 # @app.get("/video/{video_id}")
-# async def stream_video(
-#     request: Request,
-#     video: Video = Depends(get_video_or_404),
-#     session: AsyncSession = Depends(get_session),
-# ):
-#     # 1. Проверяем наличие файла
-#     file_path = UPLOAD_DIR / pathlib.Path(video.url).name
+# async def stream_video(video: Video = Depends(get_video_or_404)):
 
-#     if not file_path.exists():
-#         raise HTTPException(
-#             status_code=status.HTTP_404_NOT_FOUND,
-#             detail="Video file not found",
-#         )
+#     async def iter_video():
+#         async with httpx.AsyncClient() as client:
+#             async with client.stream("GET", video.url) as response:
+#                 async for chunk in response.aiter_bytes():
+#                     yield chunk
 
-#     file_size = os.path.getsize(file_path)
-#     range_header = request.headers.get("range")
-
-#     # 2. Инкремент просмотров (без race condition)
-#     await session.execute(
-#         update(Video)
-#         .where(Video.id == video.id)
-#         .values(views=func.coalesce(Video.views, 0) + 1)
-#     )
-#     await session.commit()
-
-#     # 3. Если Range нет — отдаём весь файл
-#     if not range_header:
-#         return StreamingResponse(
-#             file_iterator(str(file_path), 0, file_size - 1),
-#             media_type="video/mp4",
-#             headers={
-#                 "Content-Length": str(file_size),
-#                 "Accept-Ranges": "bytes",
-#             },
-#         )
-
-#     # 4. Парсим Range
-#     try:
-#         _, range_value = range_header.split("=")
-#         start_str, end_str = range_value.split("-")
-#         start = int(start_str)
-#         end = int(end_str) if end_str else file_size - 1
-#     except ValueError:
-#         raise HTTPException(
-#             status_code=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE,
-#             detail="Invalid Range header",
-#         )
-
-#     if start >= file_size:
-#         raise HTTPException(
-#             status_code=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE,
-#             detail="Range not satisfiable",
-#         )
-
-#     end = min(end, file_size - 1)
-#     content_length = end - start + 1
-
-#     # 5. Частичный контент
 #     return StreamingResponse(
-#         file_iterator(str(file_path), start, end),
-#         status_code=status.HTTP_206_PARTIAL_CONTENT,
-#         media_type="video/mp4",
-#         headers={
-#             "Content-Range": f"bytes {start}-{end}/{file_size}",
-#             "Accept-Ranges": "bytes",
-#             "Content-Length": str(content_length),
-#         },
+#         iter_video(),
+#         media_type="video/mp4"
 #     )
-
 
 # Фильтрация видео
 @app.get("/filter")

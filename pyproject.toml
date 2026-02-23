@@ -13,6 +13,7 @@ dependencies = [
     "dropbox>=12.0.2",
     "fastapi>=0.124.2",
     "gunicorn>=23.0.0",
+    "httpx>=0.28.1",
     "psycopg2>=2.9.11",
     "pydantic-settings>=2.12.0",
     "pydantic[email]>=2.12.5",
