@@ -1,9 +1,8 @@
-import os
 import pathlib
 import uuid
-import aiofiles
 import dropbox
 from dropbox.files import WriteMode
+from dropbox.exceptions import ApiError
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form, Request, status
 from fastapi.responses import StreamingResponse
 from fastapi.responses import RedirectResponse
@@ -82,6 +81,7 @@ async def upload_video(
             description=description,
             channel_id=channel_id,
             url=dropbox_url,
+            storage_path=dropbox_path,
             author_id=user.id,
         )
 
@@ -119,22 +119,6 @@ async def get_video_stream(
     )
 
 
-
-# Стриминг видео
-# @app.get("/video/{video_id}")
-# async def stream_video(video: Video = Depends(get_video_or_404)):
-
-#     async def iter_video():
-#         async with httpx.AsyncClient() as client:
-#             async with client.stream("GET", video.url) as response:
-#                 async for chunk in response.aiter_bytes():
-#                     yield chunk
-
-#     return StreamingResponse(
-#         iter_video(),
-#         media_type="video/mp4"
-#     )
-
 # Фильтрация видео
 @app.get("/filter")
 async def filters(title:str=None, 
@@ -159,26 +143,34 @@ async def filters(title:str=None,
 async def get_video(video: Video = Depends(get_video_or_404)):
     return video
 
+
 # Удаление видео по id
-# @app.delete("/video/{video_id}", status_code=204)
-# async def delete_video(
-#     video: Video = Depends(get_video_owned_by_user),
-#     session: AsyncSession = Depends(get_session),
-# ):
-#     file_path = UPLOAD_DIR / pathlib.Path(video.url).name
+@app.delete("/video/{video_id}", status_code=204)
+async def delete_video(
+    video: Video = Depends(get_video_owned_by_user),
+    session: AsyncSession = Depends(get_session),
+):
 
-#     try:
-#         await session.delete(video)
-#         await session.commit()
-
-#         if file_path.exists():
-#             file_path.unlink()
-
-#     except Exception:
-#         await session.rollback()
-#         raise HTTPException(status_code=500, detail="Failed to delete video")
-
-#     return None
+    try:
+        # 1. удаляем файл из Dropbox
+        try:
+            dbx.files_delete_v2(video.storage_path)
+        except ApiError as e:
+            # если файл уже удалён — не критично
+            if e.error.is_path_lookup():
+                pass
+            else:
+                raise
+        # 2. удаляем запись из БД
+        await session.delete(video)
+        await session.commit()
+    except Exception as e:
+        await session.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete video: {e}",
+        )
+    return None
 
 # Ставим like
 @app.post("/video/{video_id}/like")

@@ -19,6 +19,7 @@ class Video(Base):
     title:Mapped[str] = mapped_column(nullable=False)
     description: Mapped[str] = mapped_column(nullable=False)
     url: Mapped[str] = mapped_column(nullable=False)
+    storage_path: Mapped[str] = mapped_column(nullable=False)
     views: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     likes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
 
