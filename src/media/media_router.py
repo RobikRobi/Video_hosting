@@ -4,14 +4,13 @@ import dropbox
 from dropbox.files import WriteMode
 from dropbox.exceptions import ApiError
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form, Request, status
-from fastapi.responses import StreamingResponse
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import update, func, select
 from sqlalchemy.orm import selectinload
 from src.db import get_session
 from src.config import config
-from src.media.media_utillits import file_iterator, get_video_or_404, get_video_owned_by_user
+from src.media.media_utillits import get_video_or_404, get_video_owned_by_user
 from src.media.media_utillits import get_user_video_like, get_user_channel, get_comment_or_404
 from src.media.media_utillits import check_comment_owner
 from src.get_current_user import get_current_user
@@ -20,6 +19,8 @@ from src.models.VideoModel import Video, VideoLike
 from src.models.CommentModel import Comment
 from src.models.ChannelModel import Channel
 from src.media.media_shema import VideoShow, CommentCreate, CommentOut, CommentUpdate
+from src.media.media_utillits import get_recommendation_data
+from src.media.recommendation_service import VideoRecommender
 
 
 
@@ -98,25 +99,32 @@ async def upload_video(
     finally:
         await file.close()
 
-# Стриминг видео
-@app.get("/video/{video_id}")
-async def get_video_stream(
-    video: Video = Depends(get_video_or_404),
-    session: AsyncSession = Depends(get_session),
-):
-    # увеличиваем просмотры
-    await session.execute(
-        update(Video)
-        .where(Video.id == video.id)
-        .values(views=func.coalesce(Video.views, 0) + 1)
-    )
-    await session.commit()
 
-    # редирект на Dropbox CDN
-    return RedirectResponse(
-        url=video.url,
-        status_code=302
+# Рекомендации видео
+@app.get("/recommendations")
+async def get_video_recommendations(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
+    # Получаем данные и маппинги
+    matrix, user_to_idx, idx_to_video = await get_recommendation_data(session)
+    
+    if user.id not in user_to_idx:
+        return {"items": []} # Новый пользователь без лайков
+
+    recommender = VideoRecommender()
+    video_uuids = recommender.get_recommendations(
+        matrix, 
+        user_to_idx[user.id], 
+        idx_to_video, 
+        n=10
     )
+
+    # Загружаем объекты видео из БД по списку UUID
+    result = await session.execute(
+        select(Video).where(Video.id.in_(video_uuids))
+    )
+    return result.scalars().all()
 
 
 # Фильтрация видео
@@ -138,6 +146,30 @@ async def filters(title:str=None,
                                  (Video.description.ilike(f"%{description}%")))
      
      return videos.all()
+
+
+
+# Стриминг видео
+@app.get("/video/{video_id}")
+async def get_video_stream(
+    video: Video = Depends(get_video_or_404),
+    session: AsyncSession = Depends(get_session),
+):
+    # увеличиваем просмотры
+    await session.execute(
+        update(Video)
+        .where(Video.id == video.id)
+        .values(views=func.coalesce(Video.views, 0) + 1)
+    )
+    await session.commit()
+
+    # редирект на Dropbox CDN
+    return RedirectResponse(
+        url=video.url,
+        status_code=302
+    )
+
+
 # Получение информации о видео
 @app.get("/info/{video_id}", response_model=VideoShow)
 async def get_video(video: Video = Depends(get_video_or_404)):
@@ -204,12 +236,15 @@ async def toggle_like(
 
     return {"liked": True}
 
+
 # Получить статус лайка для пользователя
 @app.get("/video/{video_id}/like")
 async def is_liked(
     like: VideoLike | None = Depends(get_user_video_like),
 ):
     return {"liked": like is not None}
+
+
 
 # Оставить комментарии под видео
 @app.post("/{video_id}/comments", response_model=CommentOut, status_code=status.HTTP_201_CREATED)
