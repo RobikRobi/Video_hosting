@@ -10,5 +10,4 @@ __pycache__/
 *.pyc
 tasks.txt
 
-postgres_data
-postgres_data/postmaster.pid
+postgres_data/
