@@ -1,6 +1,7 @@
 import pathlib
 import uuid
 import dropbox
+import json
 from dropbox.files import WriteMode
 from dropbox.exceptions import ApiError
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form, Request, status
@@ -21,8 +22,7 @@ from src.models.ChannelModel import Channel
 from src.media.media_shema import VideoShow, CommentCreate, CommentOut, CommentUpdate
 from src.media.media_utillits import get_recommendation_data
 from src.media.recommendation_service import VideoRecommender
-
-
+from src.redis_sync import redis_client
 
 
 app = APIRouter(prefix="/media", tags=["Media"])
@@ -106,25 +106,33 @@ async def get_video_recommendations(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
-    # Получаем данные и маппинги
+    cache_key = f"recommendations:user:{user.id}"
+
+    # Проверяем кэш
+    cached = await redis_client.get(cache_key)
+    if cached:
+        return {"items": json.loads(cached)}
+
+    # Если нет в кэше — считаем
     matrix, user_to_idx, idx_to_video = await get_recommendation_data(session)
-    
+
     if user.id not in user_to_idx:
-        return {"items": []} # Новый пользователь без лайков
+        return {"items": []}
 
     recommender = VideoRecommender()
     video_uuids = recommender.get_recommendations(
-        matrix, 
-        user_to_idx[user.id], 
-        idx_to_video, 
+        matrix,
+        user_to_idx[user.id],
+        idx_to_video,
         n=10
     )
-
-    # Загружаем объекты видео из БД по списку UUID
-    result = await session.execute(
-        select(Video).where(Video.id.in_(video_uuids))
+    # Сохраняем в кэш
+    await redis_client.set(
+        cache_key,
+        json.dumps(video_uuids),
+        ex=1800  # TTL 30 минут
     )
-    return result.scalars().all()
+    return {"items": video_uuids}
 
 
 # Фильтрация видео
