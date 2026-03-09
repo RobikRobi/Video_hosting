@@ -2,7 +2,6 @@ import pathlib
 import uuid
 import dropbox
 import json
-from dropbox.files import WriteMode
 from dropbox.exceptions import ApiError
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form, Request, status
 from fastapi.responses import RedirectResponse
@@ -12,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from src.db import get_session
 from src.config import config
 from src.media.media_utillits import get_video_or_404, get_video_owned_by_user
-from src.media.media_utillits import get_user_video_like, get_user_channel, get_comment_or_404
+from src.media.media_utillits import get_user_video_like, get_comment_or_404
 from src.media.media_utillits import check_comment_owner
 from src.get_current_user import get_current_user
 from src.models.UserModel import User
@@ -23,38 +22,17 @@ from src.media.media_shema import VideoShow, CommentCreate, CommentOut, CommentU
 from src.media.media_utillits import get_recommendation_data
 from src.media.recommendation_service import VideoRecommender
 from src.redis_sync import redis_client
+from src.media.media_utillits import upload_to_dropbox
 
 
 app = APIRouter(prefix="/media", tags=["Media"])
 
-# app = APIRouter(prefix="/videos", tags=["Videos"])
+
 dbx = dropbox.Dropbox(
     oauth2_refresh_token=config.env_data.DROPBOX_REFRESH_TOKEN,
     app_key=config.env_data.DROPBOX_APP_KEY,
     app_secret=config.env_data.DROPBOX_APP_SECRET,
 )
-
-CHUNK_SIZE = 4 * 1024 * 1024
-
-# Функция для загрузки видео на dropbox
-async def upload_to_dropbox(file: UploadFile, dropbox_path: str) -> str:
-    first_chunk = await file.read(CHUNK_SIZE)
-
-    session = dbx.files_upload_session_start(first_chunk)
-    cursor = dropbox.files.UploadSessionCursor(
-        session_id=session.session_id,
-        offset=len(first_chunk),
-    )
-
-    while chunk := await file.read(CHUNK_SIZE):
-        dbx.files_upload_session_append_v2(chunk, cursor)
-        cursor.offset += len(chunk)
-
-    commit = dropbox.files.CommitInfo(path=dropbox_path, mode=WriteMode.overwrite)
-    dbx.files_upload_session_finish(b"", cursor, commit)
-
-    shared = dbx.sharing_create_shared_link_with_settings(dropbox_path)
-    return shared.url.replace("?dl=0", "?raw=1")
 
 # Загрузка видео в dropbox
 @app.post("/save", status_code=201)

@@ -1,7 +1,9 @@
 import numpy as np
+import dropbox
 from uuid import UUID
 from typing import Generator
-from fastapi import Depends, HTTPException, status
+from dropbox.files import WriteMode
+from fastapi import Depends, HTTPException,  UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -12,8 +14,37 @@ from src.models.VideoModel import Video, VideoLike
 from src.models.UserModel import User
 from src.models.ChannelModel import Channel
 from src.models.CommentModel import Comment
+from src.config import config
 
 
+
+dbx = dropbox.Dropbox(
+    oauth2_refresh_token=config.env_data.DROPBOX_REFRESH_TOKEN,
+    app_key=config.env_data.DROPBOX_APP_KEY,
+    app_secret=config.env_data.DROPBOX_APP_SECRET,
+)
+
+CHUNK_SIZE = 4 * 1024 * 1024
+
+# Функция для загрузки видео на dropbox
+async def upload_to_dropbox(file: UploadFile, dropbox_path: str) -> str:
+    first_chunk = await file.read(CHUNK_SIZE)
+
+    session = dbx.files_upload_session_start(first_chunk)
+    cursor = dropbox.files.UploadSessionCursor(
+        session_id=session.session_id,
+        offset=len(first_chunk),
+    )
+
+    while chunk := await file.read(CHUNK_SIZE):
+        dbx.files_upload_session_append_v2(chunk, cursor)
+        cursor.offset += len(chunk)
+
+    commit = dropbox.files.CommitInfo(path=dropbox_path, mode=WriteMode.overwrite)
+    dbx.files_upload_session_finish(b"", cursor, commit)
+
+    shared = dbx.sharing_create_shared_link_with_settings(dropbox_path)
+    return shared.url.replace("?dl=0", "?raw=1")
 
 
 # Генератор чанков файла
@@ -34,6 +65,7 @@ def file_iterator(
                 break
             remaining -= len(data)
             yield data
+
 
 # Функция для проверки наличия видео в БД
 async def get_video_or_404(
