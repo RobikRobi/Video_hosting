@@ -9,3 +9,5 @@ src/auth/tokens/*.pem
 __pycache__/
 *.pyc
 tasks.txt
+
+postgres_data/

@@ -1,6 +1,9 @@
+import numpy as np
+import dropbox
 from uuid import UUID
 from typing import Generator
-from fastapi import Depends, HTTPException, status
+from dropbox.files import WriteMode
+from fastapi import Depends, HTTPException,  UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -13,8 +16,37 @@ from src.models.VideoModel import Video, VideoLike
 from src.models.UserModel import User
 from src.models.ChannelModel import Channel
 from src.models.CommentModel import Comment
+from src.config import config
 
 
+
+dbx = dropbox.Dropbox(
+    oauth2_refresh_token=config.env_data.DROPBOX_REFRESH_TOKEN,
+    app_key=config.env_data.DROPBOX_APP_KEY,
+    app_secret=config.env_data.DROPBOX_APP_SECRET,
+)
+
+CHUNK_SIZE = 4 * 1024 * 1024
+
+# Функция для загрузки видео на dropbox
+async def upload_to_dropbox(file: UploadFile, dropbox_path: str) -> str:
+    first_chunk = await file.read(CHUNK_SIZE)
+
+    session = dbx.files_upload_session_start(first_chunk)
+    cursor = dropbox.files.UploadSessionCursor(
+        session_id=session.session_id,
+        offset=len(first_chunk),
+    )
+
+    while chunk := await file.read(CHUNK_SIZE):
+        dbx.files_upload_session_append_v2(chunk, cursor)
+        cursor.offset += len(chunk)
+
+    commit = dropbox.files.CommitInfo(path=dropbox_path, mode=WriteMode.overwrite)
+    dbx.files_upload_session_finish(b"", cursor, commit)
+
+    shared = dbx.sharing_create_shared_link_with_settings(dropbox_path)
+    return shared.url.replace("?dl=0", "?raw=1")
 
 
 # Генератор чанков файла
@@ -35,6 +67,7 @@ def file_iterator(
                 break
             remaining -= len(data)
             yield data
+
 
 # Функция для проверки наличия видео в БД
 async def get_video_or_404(
@@ -123,3 +156,32 @@ def check_comment_owner(
         )
     return comment
 
+<<<<<<< HEAD
+=======
+# Сборщик матрицы
+async def get_recommendation_data(session: AsyncSession):
+    # 1. Получаем все ID пользователей и видео для индексации
+    users_result = await session.execute(select(User.id).order_by(User.id))
+    user_ids = users_result.scalars().all()
+    
+    videos_result = await session.execute(select(Video.id).order_by(Video.id))
+    video_ids = videos_result.scalars().all()
+
+    # Создаем маппинги: ID -> индекс в матрице
+    user_to_idx = {user_id: i for i, user_id in enumerate(user_ids)}
+    video_to_idx = {vid_id: i for i, vid_id in enumerate(video_ids)}
+    
+    # Обратный маппинг для получения UUID видео из индекса
+    idx_to_video = {i: vid_id for vid_id, i in video_to_idx.items()}
+
+    # 2. Создаем пустую матрицу
+    matrix = np.zeros((len(user_ids), len(video_ids)), dtype=np.int8)
+
+    # 3. Заполняем матрицу лайками из БД
+    likes_result = await session.execute(select(VideoLike.user_id, VideoLike.video_id))
+    for u_id, v_id in likes_result.all():
+        if u_id in user_to_idx and v_id in video_to_idx:
+            matrix[user_to_idx[u_id]][video_to_idx[v_id]] = 1
+            
+    return matrix, user_to_idx, idx_to_video
+>>>>>>> fix-video-stream

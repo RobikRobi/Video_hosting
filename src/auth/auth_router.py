@@ -114,6 +114,9 @@ text = """
 
 С уважением, администрация хостинга
 """
+
+
+
 # Регистрация пользователя с отправкой сообщения на email
 @app.post("/register")
 async def register_user(data:RegisterUser, session:AsyncSession = Depends(get_session)):
@@ -143,6 +146,7 @@ async def register_user(data:RegisterUser, session:AsyncSession = Depends(get_se
     data_dict["token"] = user_token  
         
     return data_dict
+
 
 # Запрос на восстановление пароля
 @app.post("/password-reset")
@@ -178,6 +182,7 @@ async def password_reset_request(
     )
 
     return {"status": "ok"}
+
 
 # Подтверждение и смена пароля
 @app.post("/password-reset/confirm")

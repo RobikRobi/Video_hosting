@@ -1,8 +1,10 @@
-from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status
+import uuid
+import dropbox
+from fastapi import APIRouter, Depends, HTTPException,  UploadFile, File, Form, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from src.db import get_session
+from src.config import config
 from src.get_current_user import get_current_user
 from src.channel.channel_shema import CreateChannel, ShowChannel, SubscriptionChannelOut, ChannelUpdate
 from src.models.UserModel import User
@@ -12,14 +14,23 @@ from src.channel.channel_utillits import get_channel_or_404, get_owned_channel
 
 app = APIRouter(prefix="/channel", tags=["Channel"])
 
+
+dbx = dropbox.Dropbox(
+    oauth2_refresh_token=config.env_data.DROPBOX_REFRESH_TOKEN,
+    app_key=config.env_data.DROPBOX_APP_KEY,
+    app_secret=config.env_data.DROPBOX_APP_SECRET,
+)
+
 # Создание канала
 @app.post("/", status_code=status.HTTP_201_CREATED)
 async def create_channel(
-    data: CreateChannel,
+    title: str = Form(...),
+    description: str = Form(...),
+    avatar: UploadFile | None = File(None),
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    # Проверяем, есть ли уже канал
+
     result = await session.execute(
         select(Channel).where(Channel.owner_id == user.id)
     )
@@ -31,10 +42,28 @@ async def create_channel(
             detail="You already have a channel",
         )
 
+    img_path = None
+
+    if avatar:
+        ext = avatar.filename.split(".")[-1]
+        img_id = uuid.uuid4()
+
+        dropbox_path = f"/images/{img_id}.{ext}"
+
+        file_bytes = await avatar.read()
+
+        dbx.files_upload(
+            file_bytes,
+            dropbox_path,
+            mode=dropbox.files.WriteMode.overwrite
+        )
+
+        img_path = dropbox_path
+
     new_channel = Channel(
-        title=data.title.strip(),
-        description=data.description.strip(),
-        img=data.img,
+        title=title.strip(),
+        description=description.strip(),
+        img=img_path,
         owner_id=user.id,
     )
 
@@ -106,7 +135,7 @@ async def subscribe_to_channel(
 
 # Отписка от канала
 @app.delete("/{channel_id}/subscribe", status_code=status.HTTP_200_OK)
-async def unsubscribe_from_channel(channel_id: UUID, 
+async def unsubscribe_from_channel(channel_id: uuid.UUID, 
                                    user: User = Depends(get_current_user),
                                    session: AsyncSession = Depends(get_session)):
     result = await session.execute(
