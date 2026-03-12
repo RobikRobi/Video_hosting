@@ -1,4 +1,5 @@
 import httpx
+import shutil
 import pathlib
 import uuid
 import dropbox
@@ -26,7 +27,7 @@ from src.media.media_utillits import get_recommendation_data
 from src.media.recommendation_service import VideoRecommender
 from src.redis_sync import redis_client
 from src.media.media_utillits import upload_to_dropbox
-
+from src.celery_app import upload_video_task
 
 app = APIRouter(prefix="/media", tags=["Media"])
 
@@ -37,6 +38,48 @@ dbx = dropbox.Dropbox(
     app_secret=config.env_data.DROPBOX_APP_SECRET,
 )
 # Загрузка видео в dropbox
+# @app.post("/save", status_code=201)
+# async def upload_video(
+#     title: str = Form(...),
+#     description: str = Form(...),
+#     channel_id: uuid.UUID = Form(...),
+#     file: UploadFile = File(...),
+#     user: User = Depends(get_current_user),
+#     session: AsyncSession = Depends(get_session),
+# ):
+#     ext = pathlib.Path(file.filename).suffix.lower()
+#     if ext != ".mp4":
+#         raise HTTPException(400, "Only .mp4 allowed")
+
+#     video_id = uuid.uuid4()
+#     dropbox_path = f"/videos/{video_id}{ext}"
+
+#     try:
+#         dropbox_url = await upload_to_dropbox(file, dropbox_path)
+
+#         video = Video(
+#             id=video_id,
+#             title=title,
+#             description=description,
+#             channel_id=channel_id,
+#             url=dropbox_url,
+#             storage_path=dropbox_path,
+#             author_id=user.id,
+#         )
+
+#         session.add(video)
+#         await session.commit()
+#         await session.refresh(video)
+
+#         return video
+
+#     except Exception as e:
+#         await session.rollback()
+#         raise HTTPException(500, f"Upload failed: {e}")
+
+#     finally:
+#         await file.close()
+
 @app.post("/save", status_code=201)
 async def upload_video(
     title: str = Form(...),
@@ -46,39 +89,43 @@ async def upload_video(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
+
     ext = pathlib.Path(file.filename).suffix.lower()
+
     if ext != ".mp4":
         raise HTTPException(400, "Only .mp4 allowed")
 
     video_id = uuid.uuid4()
     dropbox_path = f"/videos/{video_id}{ext}"
 
-    try:
-        dropbox_url = await upload_to_dropbox(file, dropbox_path)
+    temp_path = f"/tmp/{video_id}{ext}"
 
-        video = Video(
-            id=video_id,
-            title=title,
-            description=description,
-            channel_id=channel_id,
-            url=dropbox_url,
-            storage_path=dropbox_path,
-            author_id=user.id,
-        )
+    with open(temp_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
 
-        session.add(video)
-        await session.commit()
-        await session.refresh(video)
+    video = Video(
+        id=video_id,
+        title=title,
+        description=description,
+        channel_id=channel_id,
+        storage_path=dropbox_path,
+        author_id=user.id,
+        status="processing",
+    )
 
-        return video
+    session.add(video)
+    await session.commit()
 
-    except Exception as e:
-        await session.rollback()
-        raise HTTPException(500, f"Upload failed: {e}")
+    upload_video_task.delay(
+        str(video_id),
+        temp_path,
+        dropbox_path
+    )
 
-    finally:
-        await file.close()
-
+    return {
+        "message": "Video upload started",
+        "video_id": video_id
+    }
 
 # Рекомендации видео
 @app.get("/recommendations")

@@ -19,13 +19,10 @@ class Video(Base):
     title:Mapped[str] = mapped_column(nullable=False)
     description: Mapped[str] = mapped_column(nullable=False)
     url: Mapped[str] = mapped_column(nullable=False)
-<<<<<<< HEAD
-    storage_path: Mapped[str] = mapped_column(nullable=False) #DropBox path
-=======
     storage_path: Mapped[str] = mapped_column(nullable=False)
->>>>>>> fix-video-stream
     views: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     likes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(default="processing")
 
     # Связи
     # Автор видео

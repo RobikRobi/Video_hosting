@@ -156,8 +156,6 @@ def check_comment_owner(
         )
     return comment
 
-<<<<<<< HEAD
-=======
 # Сборщик матрицы
 async def get_recommendation_data(session: AsyncSession):
     # 1. Получаем все ID пользователей и видео для индексации
@@ -184,4 +182,3 @@ async def get_recommendation_data(session: AsyncSession):
             matrix[user_to_idx[u_id]][video_to_idx[v_id]] = 1
             
     return matrix, user_to_idx, idx_to_video
->>>>>>> fix-video-stream
