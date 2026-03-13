@@ -18,7 +18,7 @@ class Video(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title:Mapped[str] = mapped_column(nullable=False)
     description: Mapped[str] = mapped_column(nullable=False)
-    url: Mapped[str] = mapped_column(nullable=False)
+    url: Mapped[str | None] = mapped_column(nullable=True)
     storage_path: Mapped[str] = mapped_column(nullable=False)
     views: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     likes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
